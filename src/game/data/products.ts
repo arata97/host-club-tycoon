@@ -73,12 +73,13 @@ function pick<T>(arr: readonly T[]): T {
  * 客の注文を決める。
  * - 通常客: 提供可能グレードから、低グレードほど出やすい重み付きで選ぶ
  * - VIP: 最高グレードの中からランダム
+ * - orderBonus: 着いているホストの格（0〜4）。大きいほど高グレードに寄る
  */
-export function rollOrder(maxGrade: Grade, vip: boolean): Product {
+export function rollOrder(maxGrade: Grade, vip: boolean, orderBonus = 0): Product {
   if (vip) return pick(PRODUCTS.filter((p) => p.grade === maxGrade));
-  // グレード重み: 最高グレード 1、ひとつ下 2、…
+  // グレード g の重み = (maxGrade - g + 1) + orderBonus × g
   const weights: number[] = [];
-  for (let g = 1 as number; g <= maxGrade; g++) weights.push(maxGrade - g + 1);
+  for (let g = 1; g <= maxGrade; g++) weights.push(maxGrade - g + 1 + orderBonus * g);
   const total = weights.reduce((a, b) => a + b, 0);
   let r = Math.random() * total;
   let grade: Grade = 1;

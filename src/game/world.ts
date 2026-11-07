@@ -1,10 +1,12 @@
 import { LOGICAL_H, LOGICAL_W } from "../engine/canvas";
 import type { Vec2 } from "../engine/input";
 import { CELLAR, CUSTOMER, PLAYER } from "./data/balance";
+import { HOST_ROSTER } from "./data/hosts";
 import { maxGradeForCellar, rollOrder } from "./data/products";
 import { Cellar } from "./entities/cellar";
 import { Customer } from "./entities/customer";
-import { Host, type HostWorld } from "./entities/host";
+import { Host } from "./entities/host";
+import { Staff, staffCarryFor, staffSpeedFor, type StaffWorld } from "./entities/staff";
 import { Table } from "./entities/table";
 import { Player } from "./player";
 import type { GameState } from "./state";
@@ -14,26 +16,29 @@ import { distance, FloatingTexts, formatG } from "./util";
 const WALL_BOTTOM = 40;
 const ENTRANCE = { x: 22, y: 282 };
 const CELLAR_POS = { x: 430, y: 70 };
+/** ホストの待機席（右端に縦に並ぶ） */
+const HOST_STANDBY = { x: 455, y: 140, gap: 22 };
 const TABLE_SLOTS: ReadonlyArray<{ x: number; y: number }> = [
-  { x: 90, y: 135 },
-  { x: 185, y: 135 },
-  { x: 280, y: 135 },
-  { x: 375, y: 135 },
-  { x: 90, y: 230 },
-  { x: 185, y: 230 },
-  { x: 280, y: 230 },
-  { x: 375, y: 230 },
+  { x: 80, y: 135 },
+  { x: 175, y: 135 },
+  { x: 270, y: 135 },
+  { x: 365, y: 135 },
+  { x: 80, y: 230 },
+  { x: 175, y: 230 },
+  { x: 270, y: 230 },
+  { x: 365, y: 230 },
 ];
-const HOST_NAMES = ["蓮", "翔", "ユウ", "ガロン", "海斗", "コタロウ"];
+const STAFF_NAMES = ["黒服A", "黒服B", "黒服C", "黒服D", "黒服E", "黒服F"];
 
 /**
  * 店舗1フロアのシミュレーション。エンティティの生成・相互作用・描画を担当する。
  * 永続データは GameState が持ち、World は毎フレームそれを参照・更新する。
  */
-export class World implements HostWorld {
+export class World implements StaffWorld {
   readonly player = new Player(LOGICAL_W / 2, LOGICAL_H / 2 + 20);
   readonly cellar = new Cellar(CELLAR_POS.x, CELLAR_POS.y);
   readonly tables: Table[] = [];
+  readonly staff: Staff[] = [];
   readonly hosts: Host[] = [];
   private customers: Customer[] = [];
   private readonly floats = new FloatingTexts();
@@ -47,22 +52,33 @@ export class World implements HostWorld {
     this.syncWithState();
   }
 
-  /** テーブル数・ホスト数などを GameState に合わせる（購入後に呼ぶ） */
+  get staffSpeed(): number {
+    return staffSpeedFor(this.state.staffLevel);
+  }
+  get staffCarry(): number {
+    return staffCarryFor(this.state.staffLevel);
+  }
+
+  /** テーブル数・内勤数・ホスト数を GameState に合わせる（購入後に呼ぶ） */
   syncWithState(): void {
     while (this.tables.length < this.state.tableCount) {
       const slot = TABLE_SLOTS[this.tables.length];
       if (!slot) break;
       this.tables.push(new Table(slot.x, slot.y));
     }
+    while (this.staff.length < this.state.staffCount) {
+      const name = STAFF_NAMES[this.staff.length] ?? "黒服";
+      this.staff.push(new Staff(this.cellar.interactX - 24 + this.staff.length * 8, this.cellar.interactY + 12, name));
+    }
     while (this.hosts.length < this.state.hostCount) {
-      const name = HOST_NAMES[this.hosts.length % HOST_NAMES.length] ?? "ホスト";
-      this.hosts.push(new Host(this.cellar.interactX - 20 + this.hosts.length * 8, this.cellar.interactY + 10, name));
+      const def = HOST_ROSTER[this.hosts.length];
+      if (!def) break;
+      const sy = HOST_STANDBY.y + this.hosts.length * HOST_STANDBY.gap;
+      this.hosts.push(new Host(HOST_STANDBY.x, sy, def, HOST_STANDBY.x, sy));
     }
   }
 
-  onServed(table: Table, _server: Host | Player): void {
-    const c = table.customer;
-    if (!c) return;
+  onServed(table: Table): void {
     this.floats.add(table.x, table.y - 24, "提供!", "#8fd3ff");
   }
 
@@ -88,25 +104,25 @@ export class World implements HostWorld {
       }
     }
 
-    // 主人公: 自動提供
+    // 主人公: 卓の前に立つ → 提供（持っていれば）＋接客
     this.serveT += dt;
-    if (this.player.carrying > 0 && this.serveT >= PLAYER.serveInterval) {
-      for (const t of this.tables) {
-        if (!t.needsService) continue;
-        if (distance(this.player, { x: t.serveX, y: t.serveY }) < PLAYER.interactRadius) {
-          if (t.customer?.serve()) {
-            this.player.carrying -= 1;
-            this.serveT = 0;
-            if (t.claimedBy) t.claimedBy = null;
-            this.onServed(t, this.player);
-          }
-          break;
+    for (const t of this.tables) {
+      const c = t.customer;
+      const near = distance(this.player, { x: t.serveX, y: t.serveY }) < PLAYER.interactRadius;
+      if (c && c.phase !== "walking") c.setPlayerHosting(near);
+      if (near && t.needsService && this.player.carrying > 0 && this.serveT >= PLAYER.serveInterval) {
+        if (c?.serve()) {
+          this.player.carrying -= 1;
+          this.serveT = 0;
+          t.claimedBy = null;
+          this.onServed(t);
         }
       }
     }
 
-    // ホスト
-    for (const h of this.hosts) h.update(dt, this);
+    // 内勤とホスト
+    for (const st of this.staff) st.update(dt, this);
+    for (const h of this.hosts) h.update(dt, this.tables);
 
     // 客の生成
     this.spawnT -= dt;
@@ -119,10 +135,11 @@ export class World implements HostWorld {
     for (const c of this.customers) {
       const ev = c.update(dt);
       if (ev === "paid") {
-        const amount = c.price;
+        const amount = c.lastPaid;
         s.earn(amount);
         this.floats.add(c.table.x, c.table.y - 30, `+${formatG(amount)}`, c.vip ? "#ffd166" : "#f6c453");
-        this.lastSale = { text: `${c.vip ? "VIP " : ""}${c.order.name} ${formatG(amount)}`, t: 3 };
+        const who = c.host ? `[${c.host.name}] ` : c.hostedByPlayer ? "[店長] " : "";
+        this.lastSale = { text: `${who}${c.vip ? "VIP " : ""}${c.order.name} ${formatG(amount)}`, t: 3 };
       } else if (ev === "gaveUp") {
         this.floats.add(c.table.x, c.table.y - 30, "帰った…", "#ff6b6b");
       }
@@ -146,8 +163,9 @@ export class World implements HostWorld {
     const table = free[Math.floor(Math.random() * free.length)];
     if (!table) return;
     const vip = Math.random() < CUSTOMER.vipChance;
-    const order = rollOrder(maxGradeForCellar(this.state.cellarLevel), vip);
-    const c = new Customer(ENTRANCE.x, ENTRANCE.y, table, order, vip, ENTRANCE.x, ENTRANCE.y);
+    const maxGrade = maxGradeForCellar(this.state.cellarLevel);
+    const order = rollOrder(maxGrade, vip);
+    const c = new Customer(ENTRANCE.x, ENTRANCE.y, table, order, vip, maxGrade, ENTRANCE.x, ENTRANCE.y);
     table.customer = c;
     this.customers.push(c);
     if (vip) this.floats.add(ENTRANCE.x + 20, ENTRANCE.y - 30, "VIP来店!", "#ffd166");
@@ -161,6 +179,7 @@ export class World implements HostWorld {
     // 人物は y 順に描いて前後関係を出す
     const people: Array<{ y: number; draw: () => void }> = [
       { y: this.player.y, draw: () => this.player.draw(ctx) },
+      ...this.staff.map((st) => ({ y: st.y, draw: () => st.draw(ctx) })),
       ...this.hosts.map((h) => ({ y: h.y, draw: () => h.draw(ctx) })),
       ...this.customers.map((c) => ({ y: c.y, draw: () => c.draw(ctx) })),
     ];
@@ -197,5 +216,14 @@ export class World implements HostWorld {
     ctx.font = "6px monospace";
     ctx.fillStyle = "#8a7fa0";
     ctx.fillText("入口", 16, ENTRANCE.y - 22);
+    // ホスト待機席（右端のベンチ）
+    if (this.hosts.length > 0) {
+      const top = HOST_STANDBY.y - 14;
+      const h = this.hosts.length * HOST_STANDBY.gap + 4;
+      ctx.fillStyle = "#3a2a4f";
+      ctx.fillRect(HOST_STANDBY.x - 12, top, 24, h);
+      ctx.fillStyle = "#8a7fa0";
+      ctx.fillText("待機", HOST_STANDBY.x - 6, top - 3);
+    }
   }
 }

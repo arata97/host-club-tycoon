@@ -1,118 +1,107 @@
-import { CELLAR, HOST, PLAYER } from "../data/balance";
-import { distance, drawCarriedBottles, drawPerson, moveToward, type PersonPalette } from "../util";
-import type { Cellar } from "./cellar";
+import { HOST_RARITY, type HostStats, type Rarity } from "../data/balance";
+import { distance, drawPerson, moveToward, type PersonPalette } from "../util";
 import type { Table } from "./table";
 
-type HostPhase = "idle" | "toCellar" | "collecting" | "toTable";
+type HostPhase = "idle" | "toTable" | "serving" | "toStandby";
 
-const HOST_PALETTE: PersonPalette = { suit: "#1c1826", shirt: "#f4f0ff", skin: "#f1c9a5", hair: "#c0c8d8" };
+export const RARITY_COLOR: Record<Rarity, string> = {
+  N: "#c9bfdc",
+  R: "#8fd3ff",
+  SR: "#c77dff",
+  SSR: "#ffd166",
+  UR: "#ff6b9d",
+};
 
-/** ホストが参照するワールドの最小インターフェース */
-export interface HostWorld {
-  cellar: Cellar;
-  tables: readonly Table[];
-  /** 提供に成功したときに呼ぶ（売上計上・演出） */
-  onServed(table: Table, server: Host): void;
+export interface HostDef {
+  name: string;
+  rarity: Rarity;
+  race: string;
+  palette: PersonPalette;
 }
 
 /**
- * 従業員ホスト。酒蔵でボトルを回収し、注文待ちの客に運ぶ、を自律的に繰り返す。
- * フェーズ1では全員同じステータス（N相当）。
+ * ホスト。待機席から客のいる卓へ自動で着き、客が帰るまで接客する。
+ * 接客中は卓の売上倍率・追加注文・我慢ゲージに効果を与える（効果の適用は Customer 側）。
+ * 酒は運ばない。
  */
 export class Host {
-  carrying = 0;
-  private phase: HostPhase = "idle";
-  private target: Table | null = null;
+  phase: HostPhase = "idle";
+  table: Table | null = null;
   private walkT = 0;
   private facing: 1 | -1 = 1;
-  private actionT = 0;
+  private animT = 0;
 
   constructor(
     public x: number,
     public y: number,
-    public readonly name: string,
+    public readonly def: HostDef,
+    private readonly standbyX: number,
+    private readonly standbyY: number,
   ) {}
 
-  update(dt: number, world: HostWorld): void {
+  get name(): string {
+    return this.def.name;
+  }
+  get stats(): HostStats {
+    return HOST_RARITY[this.def.rarity];
+  }
+
+  update(dt: number, tables: readonly Table[]): void {
+    this.animT += dt;
     switch (this.phase) {
-      case "idle":
-        this.decide(world);
-        break;
-
-      case "toCellar": {
-        const c = world.cellar;
-        if (this.walk(c.interactX, c.interactY, dt)) {
-          this.phase = "collecting";
-          this.actionT = 0;
+      case "idle": {
+        const t = this.nearestWantingHost(tables);
+        if (t) {
+          t.host = this;
+          this.table = t;
+          this.phase = "toTable";
         }
         break;
       }
-
-      case "collecting": {
-        this.actionT += dt;
-        if (this.actionT >= CELLAR.pickupInterval) {
-          this.actionT = 0;
-          if (this.carrying < HOST.carry && world.cellar.take()) this.carrying += 1;
-        }
-        // 満杯、または在庫切れで1本以上持っていれば配達へ
-        if (this.carrying >= HOST.carry || (world.cellar.stock === 0 && this.carrying > 0)) {
-          this.phase = "idle";
-        } else if (world.cellar.stock === 0 && this.carrying === 0) {
-          // 在庫待ち: その場で待機（補充されたら collecting が進む）
-        }
-        break;
-      }
-
       case "toTable": {
-        const t = this.target;
-        if (!t || !t.needsService || t.claimedBy !== this) {
-          // 客が帰った／別の誰かが提供した
-          if (t && t.claimedBy === this) t.claimedBy = null;
-          this.target = null;
-          this.phase = "idle";
+        const t = this.table;
+        if (!t || t.customer === null || t.host !== this) {
+          this.release();
           break;
         }
-        if (this.walk(t.serveX, t.serveY, dt) || distance(this, { x: t.serveX, y: t.serveY }) < PLAYER.interactRadius) {
-          if (t.customer?.serve()) {
-            this.carrying -= 1;
-            world.onServed(t, this);
-          }
-          t.claimedBy = null;
-          this.target = null;
+        if (this.walk(t.hostX, t.hostY, dt)) {
+          this.phase = "serving";
+          this.facing = 1;
+          t.customer.attachHost(this);
+        }
+        break;
+      }
+      case "serving": {
+        const t = this.table;
+        if (!t || t.customer === null || t.host !== this) {
+          this.release();
+          break;
+        }
+        break;
+      }
+      case "toStandby": {
+        if (this.walk(this.standbyX, this.standbyY, dt)) {
           this.phase = "idle";
+          this.facing = -1;
         }
         break;
       }
     }
   }
 
-  private decide(world: HostWorld): void {
-    if (this.carrying > 0) {
-      const t = this.nearestUnclaimedWaiting(world.tables);
-      if (t) {
-        t.claimedBy = this;
-        this.target = t;
-        this.phase = "toTable";
-        return;
-      }
-      // 待っている客がいない: 満杯でなければ補充に行く
-      if (this.carrying < HOST.carry) {
-        this.phase = "toCellar";
-        return;
-      }
-      // 満杯で客待ち: 酒蔵前で待機
-      this.phase = "toCellar";
-      return;
-    }
-    this.phase = "toCellar";
+  /** 客が帰ったとき（Customer から呼ばれる）／卓を離れる */
+  release(): void {
+    if (this.table && this.table.host === this) this.table.host = null;
+    this.table = null;
+    this.phase = "toStandby";
   }
 
-  private nearestUnclaimedWaiting(tables: readonly Table[]): Table | null {
+  private nearestWantingHost(tables: readonly Table[]): Table | null {
     let best: Table | null = null;
     let bestD = Infinity;
     for (const t of tables) {
-      if (!t.needsService || t.claimedBy) continue;
-      const d = distance(this, { x: t.serveX, y: t.serveY });
+      if (!t.wantsHost) continue;
+      const d = distance(this, { x: t.hostX, y: t.hostY });
       if (d < bestD) {
         bestD = d;
         best = t;
@@ -123,19 +112,30 @@ export class Host {
 
   private walk(tx: number, ty: number, dt: number): boolean {
     const prevX = this.x;
-    const arrived = moveToward(this, tx, ty, HOST.speed, dt);
+    const arrived = moveToward(this, tx, ty, this.stats.speed, dt);
     if (this.x !== prevX) this.facing = this.x > prevX ? 1 : -1;
     this.walkT = arrived ? 0 : this.walkT + dt;
     return arrived;
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
-    drawPerson(ctx, this.x, this.y, HOST_PALETTE, this.walkT, this.facing);
-    drawCarriedBottles(ctx, this.x, this.y, this.carrying);
+    drawPerson(ctx, this.x, this.y, this.def.palette, this.walkT, this.facing);
+    const px = Math.round(this.x);
+    const py = Math.round(this.y);
+
+    if (this.phase === "serving") {
+      // 接客中: 音符が浮かぶ
+      const bob = Math.round(Math.sin(this.animT * 4) * 2);
+      ctx.font = "bold 8px monospace";
+      ctx.fillStyle = "#ff8fb3";
+      ctx.fillText("♪", px - 10, py - 22 + bob);
+    }
+
+    // レア度色の名札
     ctx.font = "6px monospace";
     ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(244,231,195,0.8)";
-    ctx.fillText(this.name, Math.round(this.x), Math.round(this.y) + 9);
+    ctx.fillStyle = RARITY_COLOR[this.def.rarity];
+    ctx.fillText(this.def.name, px, py + 9);
     ctx.textAlign = "left";
   }
 }

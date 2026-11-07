@@ -18,6 +18,8 @@ export class GameState {
     cellar: 0,
     speed: 0,
     carry: 0,
+    staff: 0,
+    staffLv: 0,
     host: 0,
   };
 
@@ -26,6 +28,12 @@ export class GameState {
   }
   get cellarLevel(): number {
     return 1 + this.upgrades.cellar;
+  }
+  get staffCount(): number {
+    return this.upgrades.staff;
+  }
+  get staffLevel(): number {
+    return this.upgrades.staffLv;
   }
   get hostCount(): number {
     return this.upgrades.host;
@@ -82,7 +90,9 @@ export function loadSave(): SaveData | null {
     const raw = localStorage.getItem(SAVE.key);
     if (!raw) return null;
     const data = JSON.parse(raw) as Partial<SaveData>;
-    if (typeof data !== "object" || data === null || data.v !== SAVE.version) return null;
+    if (typeof data !== "object" || data === null) return null;
+    // 旧バージョンのセーブは互換性がないため破棄（開発初期のみ）
+    if (data.v !== SAVE.version) return null;
     return data as SaveData;
   } catch {
     return null;

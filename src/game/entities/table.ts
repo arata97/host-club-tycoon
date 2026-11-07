@@ -1,12 +1,17 @@
 import type { Customer } from "./customer";
 import type { Host } from "./host";
+import type { Staff } from "./staff";
 
-/** 客席。客が1人座る。ホストが提供に向かうときは claim して重複を防ぐ。 */
+/**
+ * 客席。客が1人座り、ホストが1人着く。
+ * 内勤が提供に向かうときは claimedBy で重複を防ぐ。
+ */
 export class Table {
   customer: Customer | null = null;
-  /** 次に来店する客のために予約済み */
-  reserved = false;
-  claimedBy: Host | null = null;
+  /** 着いているホスト */
+  host: Host | null = null;
+  /** 提供に向かっている内勤 */
+  claimedBy: Staff | null = null;
   readonly w = 30;
   readonly h = 16;
 
@@ -15,14 +20,21 @@ export class Table {
     public y: number,
   ) {}
 
-  /** 客が立つ位置（テーブルの奥側） */
+  /** 客が座る位置（ソファ右側） */
   get seatX(): number {
-    return this.x;
+    return this.x + 7;
   }
   get seatY(): number {
     return this.y - 6;
   }
-  /** 提供する側が立つ位置（手前側） */
+  /** ホストが着く位置（ソファ左側） */
+  get hostX(): number {
+    return this.x - 8;
+  }
+  get hostY(): number {
+    return this.y - 6;
+  }
+  /** 提供・接客する側が立つ位置（手前側） */
   get serveX(): number {
     return this.x;
   }
@@ -31,10 +43,14 @@ export class Table {
   }
 
   get isFree(): boolean {
-    return this.customer === null && !this.reserved;
+    return this.customer === null;
   }
   get needsService(): boolean {
     return this.customer !== null && this.customer.phase === "waiting";
+  }
+  /** ホストが着く価値がある（客がいて、まだホストがいない） */
+  get wantsHost(): boolean {
+    return this.customer !== null && this.customer.phase !== "leaving" && this.customer.phase !== "gone" && this.host === null;
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -42,9 +58,9 @@ export class Table {
     const y = Math.round(this.y - this.h / 2);
     // ソファ（奥）
     ctx.fillStyle = "#7a1f3a";
-    ctx.fillRect(x - 2, y - 10, this.w + 4, 8);
+    ctx.fillRect(x - 4, y - 10, this.w + 8, 8);
     ctx.fillStyle = "#a02a4e";
-    ctx.fillRect(x - 2, y - 10, this.w + 4, 2);
+    ctx.fillRect(x - 4, y - 10, this.w + 8, 2);
     // テーブル
     ctx.fillStyle = "#1e1a2a";
     ctx.fillRect(x, y + 2, this.w, this.h);
