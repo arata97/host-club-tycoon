@@ -18,6 +18,14 @@ export class DayLedger {
   salesByHost: Record<string, number> = {};
   /** 店長が接客した売上 */
   salesByPlayer = 0;
+  /** 太客の来店数／新しく太客になった数／離れた太客 */
+  regularVisits = 0;
+  newRegulars: string[] = [];
+  lostRegulars: string[] = [];
+  /** 指名ホストが接客できた指名客の数 */
+  nominationsServed = 0;
+  /** 予算を使い切って帰った客 */
+  budgetOuts = 0;
 
   recordSale(amount: number, product: Product, hostId: string | null, byPlayer: boolean): void {
     this.sales += amount;
@@ -58,6 +66,11 @@ export interface DayReport {
   salesByPlayer: number;
   cashAfter: number;
   debtAfter: number;
+  regularVisits: number;
+  newRegulars: string[];
+  lostRegulars: string[];
+  nominationsServed: number;
+  budgetOuts: number;
 }
 
 /**
@@ -108,5 +121,10 @@ export function settleDay(state: GameState, ledger: DayLedger, onFloorIds: reado
     salesByPlayer: ledger.salesByPlayer,
     cashAfter: state.money,
     debtAfter: state.debt,
+    regularVisits: ledger.regularVisits,
+    newRegulars: [...ledger.newRegulars],
+    lostRegulars: [...ledger.lostRegulars],
+    nominationsServed: ledger.nominationsServed,
+    budgetOuts: ledger.budgetOuts,
   };
 }

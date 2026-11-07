@@ -1,7 +1,9 @@
 import { GACHA, HOST_PATIENCE_DRAIN, HOST_RARITY, type HostingEffect } from "../data/balance";
+import { STAMINA } from "../data/customers";
 import type { HostDef } from "../data/hosts";
 import { RACES } from "../data/races";
-import { distance, moveToward } from "../util";
+import type { OwnedHost } from "../state";
+import { moveToward } from "../util";
 import type { Table } from "./table";
 
 export type HostPhase = "idle" | "toTable" | "serving" | "toStandby";
@@ -11,13 +13,26 @@ export interface HostEffect extends HostingEffect {
   speed: number;
 }
 
-/** レア度・種族・限界突破からホストの接客効果を求める */
-export function hostEffect(def: HostDef, limitBreak: number): HostEffect {
+/** スタミナによる接客効果の係数（0.5〜1.0） */
+export function staminaFactor(stamina: number): number {
+  return STAMINA.effectFloor + (1 - STAMINA.effectFloor) * Math.max(0, Math.min(1, stamina / STAMINA.max));
+}
+
+/**
+ * レア度・種族・限界突破・スタミナ・時間帯からホストの接客効果を求める。
+ * stamina / lateNight を省略すると「万全・夜でない」状態（図鑑の表示用）。
+ */
+export function hostEffect(def: HostDef, limitBreak: number, stamina: number = STAMINA.max, lateNight = false): HostEffect {
   const base = HOST_RARITY[def.rarity];
   const race = RACES[def.race];
+  const revenue =
+    base.revenueMultiplier *
+    (1 + GACHA.limitBreakBonus * limitBreak) *
+    (1 + race.revenueBonus + (lateNight ? race.lateRevenueBonus : 0)) *
+    staminaFactor(stamina);
   return {
-    revenueMultiplier: base.revenueMultiplier * (1 + GACHA.limitBreakBonus * limitBreak) * (1 + race.revenueBonus),
-    extraOrders: base.extraOrders + race.extraOrders,
+    revenueMultiplier: revenue,
+    extraOrders: base.extraOrders,
     orderBonus: Math.min(4, base.orderBonus + race.orderBonus),
     patienceDrain: HOST_PATIENCE_DRAIN * race.patienceFactor,
     speed: base.speed * race.speedFactor,
@@ -25,8 +40,8 @@ export function hostEffect(def: HostDef, limitBreak: number): HostEffect {
 }
 
 /**
- * ホスト。待機席から客のいる卓へ自動で着き、客が帰るまで接客する。
- * 接客の効果は Customer 側が effect を参照して適用する。酒は運ばない。
+ * ホスト。World のつけ回しで卓を割り当てられ、客が帰るまで接客する。
+ * 接客中はスタミナが減り、待機中は回復する。酒は運ばない。
  */
 export class Host {
   phase: HostPhase = "idle";
@@ -34,12 +49,15 @@ export class Host {
   walkT = 0;
   facing: 1 | -1 = -1;
   animT = 0;
+  /** 23:00 以降か（吸血鬼の特技用。World が毎フレーム設定） */
+  lateNight = false;
 
   constructor(
     public x: number,
     public y: number,
     public readonly def: HostDef,
-    public limitBreak: number,
+    /** GameState の所持データ（限界突破・スタミナ）への参照 */
+    public owned: OwnedHost,
     private standbyX: number,
     private standbyY: number,
   ) {}
@@ -47,8 +65,18 @@ export class Host {
   get name(): string {
     return this.def.name;
   }
+  get limitBreak(): number {
+    return this.owned.lb;
+  }
+  get stamina(): number {
+    return this.owned.stamina;
+  }
   get effect(): HostEffect {
-    return hostEffect(this.def, this.limitBreak);
+    return hostEffect(this.def, this.owned.lb, this.owned.stamina, this.lateNight);
+  }
+  /** 卓に着ける状態か（手が空いていて、スタミナが足りている） */
+  get available(): boolean {
+    return (this.phase === "idle" || this.phase === "toStandby") && this.owned.stamina >= STAMINA.minToServe;
   }
 
   /** 待機席の位置を変える（出勤メンバーが入れ替わったとき） */
@@ -58,18 +86,21 @@ export class Host {
     if (this.phase === "idle") this.phase = "toStandby";
   }
 
-  update(dt: number, tables: readonly Table[]): void {
+  /** つけ回し: この卓に着く */
+  assign(t: Table): void {
+    if (this.table && this.table !== t) this.release();
+    t.host = this;
+    this.table = t;
+    this.phase = "toTable";
+  }
+
+  update(dt: number, open: boolean): void {
     this.animT += dt;
+    const race = RACES[this.def.race];
     switch (this.phase) {
-      case "idle": {
-        const t = this.nearestWantingHost(tables);
-        if (t) {
-          t.host = this;
-          this.table = t;
-          this.phase = "toTable";
-        }
+      case "idle":
+        if (open) this.regen(dt * STAMINA.regenIdle * race.staminaRegenFactor);
         break;
-      }
       case "toTable": {
         const t = this.table;
         if (!t || t.customer === null || t.host !== this) {
@@ -85,18 +116,18 @@ export class Host {
       }
       case "serving": {
         const t = this.table;
-        if (!t || t.customer === null || t.host !== this) this.release();
+        if (!t || t.customer === null || t.host !== this) {
+          this.release();
+          break;
+        }
+        if (open) {
+          this.owned.stamina = Math.max(0, this.owned.stamina - dt * STAMINA.drainServing * race.staminaDrainFactor);
+          if (this.owned.stamina <= 0) this.release(); // ダウン
+        }
         break;
       }
       case "toStandby": {
-        // 待機席へ戻る途中でも、客が待っていればそちらへ向かう
-        const t = this.nearestWantingHost(tables);
-        if (t) {
-          t.host = this;
-          this.table = t;
-          this.phase = "toTable";
-          break;
-        }
+        if (open) this.regen(dt * STAMINA.regenIdle * race.staminaRegenFactor);
         if (this.walk(this.standbyX, this.standbyY, dt)) {
           this.phase = "idle";
           this.facing = -1;
@@ -106,7 +137,11 @@ export class Host {
     }
   }
 
-  /** 卓を離れて待機席へ戻る（客が帰ったとき／出勤メンバーから外れたとき） */
+  private regen(amount: number): void {
+    this.owned.stamina = Math.min(STAMINA.max, this.owned.stamina + amount);
+  }
+
+  /** 卓を離れて待機席へ戻る（客が帰った／入れ替え／ダウン） */
   release(): void {
     const t = this.table;
     if (t) {
@@ -115,20 +150,6 @@ export class Host {
     }
     this.table = null;
     this.phase = "toStandby";
-  }
-
-  private nearestWantingHost(tables: readonly Table[]): Table | null {
-    let best: Table | null = null;
-    let bestD = Infinity;
-    for (const t of tables) {
-      if (!t.wantsHost) continue;
-      const d = distance(this, { x: t.hostX, y: t.hostY });
-      if (d < bestD) {
-        bestD = d;
-        best = t;
-      }
-    }
-    return best;
   }
 
   private walk(tx: number, ty: number, dt: number): boolean {

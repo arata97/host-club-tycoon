@@ -32,6 +32,7 @@ export function renderReport(r: DayReport): HTMLElement {
     row("売上", formatG(r.sales), "plus"),
     row(`　来店 ${r.customers} 組（VIP ${r.vipVisits}）／ 提供 ${r.bottles} 本`, ""),
     row(`　待ちきれず退店 ${r.walkouts} 組`, "", r.walkouts > 0 ? "warn" : ""),
+    row(`　太客の来店 ${r.regularVisits ?? 0} 組（指名で接客 ${r.nominationsServed ?? 0}）`, ""),
     row("原価（売価の30%）", `−${formatG(r.cogs)}`, "minus"),
     row("内勤給与", `−${formatG(r.staffWages)}`, "minus"),
     row("ホスト給与", `−${formatG(r.hostWages)}`, "minus"),
@@ -73,6 +74,16 @@ export function renderReport(r: DayReport): HTMLElement {
     right.appendChild(el);
   }
   if (r.salesByPlayer > 0) right.appendChild(row("店長の接客売上", formatG(r.salesByPlayer)));
+  const news = r.newRegulars ?? [];
+  const lost = r.lostRegulars ?? [];
+  if (news.length > 0 || lost.length > 0) {
+    const rs = document.createElement("div");
+    rs.className = "rep-sub";
+    rs.textContent = "太客";
+    right.appendChild(rs);
+    for (const n of news) right.appendChild(row(`＋ ${n}`, "新規", "plus"));
+    for (const n of lost) right.appendChild(row(`− ${n}`, "離脱", "warn"));
+  }
   cols.appendChild(right);
 
   root.appendChild(cols);

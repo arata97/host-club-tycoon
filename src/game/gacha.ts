@@ -74,7 +74,7 @@ function pullOne(state: GameState, rng: Rng): PullResult {
 
   const owned = state.hosts[def.id];
   if (!owned) {
-    state.hosts[def.id] = { lb: 0 };
+    state.hosts[def.id] = { lb: 0, stamina: 100 };
     return { def, isNew: true, limitBreak: 0, refund: 0, pityHit };
   }
   if (owned.lb < GACHA.limitBreakMax) {

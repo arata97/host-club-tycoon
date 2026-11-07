@@ -893,3 +893,201 @@ button {
 .rebirth-col b {
   color: var(--fg);
 }
+
+/* ---------- つけ回しポップアップ ---------- */
+
+#assign {
+  width: 440px;
+}
+.assign-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.assign-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+}
+.assign-prefs {
+  color: var(--sub);
+}
+.assign-nom {
+  color: #ff8fb3;
+}
+.assign-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.assign-row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto 56px 72px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+}
+.assign-row:hover:not(:disabled) {
+  border-color: var(--gold);
+}
+.assign-row.current {
+  border-color: #7bd88f;
+  background: rgba(123, 216, 143, 0.08);
+}
+.assign-row:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.assign-row.off {
+  grid-template-columns: 18px 1fr;
+  color: var(--sub);
+}
+.assign-key {
+  font-weight: 800;
+  color: var(--gold);
+  text-align: center;
+}
+.assign-name {
+  color: var(--rc, var(--fg));
+  font-weight: 700;
+}
+.assign-tags {
+  color: #ff8fb3;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.assign-status {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+.assign-stamina {
+  display: inline-block;
+  width: 52px;
+  height: 5px;
+  background: #2a2440;
+  border-radius: 3px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.assign-stamina-bar {
+  display: block;
+  height: 100%;
+  background: #7bd88f;
+}
+.assign-stamina-bar.low {
+  background: #ff6b6b;
+}
+
+/* ---------- 出勤・方針 ---------- */
+
+.roster {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+}
+.policy-list {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.policy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--sub);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.policy b {
+  font-size: 12px;
+  color: var(--fg);
+}
+.policy.active {
+  border-color: var(--gold);
+  background: rgba(246, 196, 83, 0.1);
+}
+.policy.active b {
+  color: var(--gold);
+}
+.roster-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.roster-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.roster-row {
+  display: grid;
+  grid-template-columns: auto 52px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--panel-border);
+  border-radius: 6px;
+  color: var(--sub);
+  text-align: left;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.roster-row b {
+  color: var(--rc, var(--fg));
+  font-size: 12px;
+}
+.roster-row.on {
+  border-style: solid;
+  border-color: #7bd88f;
+  background: rgba(123, 216, 143, 0.06);
+}
+.roster-check {
+  font-weight: 700;
+  color: var(--muted);
+}
+.roster-row.on .roster-check {
+  color: #7bd88f;
+}
+.roster-stamina {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.roster-row.shake {
+  animation: shake 0.3s;
+}
+@keyframes shake {
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+
+/* 図鑑の追加情報 */
+.zcard-stamina,
+.zcard-regulars {
+  font-size: 10px;
+  color: var(--sub);
+}
+.zcard-regulars {
+  color: #ff8fb3;
+}

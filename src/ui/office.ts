@@ -1,10 +1,13 @@
-import { LOAN, rentDiscount, rentFor } from "../game/data/economy";
+import { ASSIGN_POLICIES, STAMINA } from "../game/data/customers";
+import { hostGuaranteeFor, HOST_WAGE, LOAN, rentDiscount, rentFor } from "../game/data/economy";
+import { RACES } from "../game/data/races";
 import type { GameState } from "../game/state";
 import { formatG } from "../game/util";
 import { BasePanel, buildPanelHead } from "./panel";
+import { createPortrait } from "./portrait";
 import { renderReport } from "./report";
 
-type Tab = "report" | "finance";
+type Tab = "report" | "roster" | "finance";
 
 /**
  * 経営画面（開店前）。日報の確認、借入・返済、開店ボタン。
@@ -35,6 +38,7 @@ export class OfficeUI extends BasePanel {
     this.tabsEl.className = "tabs";
     for (const [key, label] of [
       ["report", "日報"],
+      ["roster", "出勤・方針"],
       ["finance", "財務"],
     ] as const) {
       const b = document.createElement("button");
@@ -70,7 +74,7 @@ export class OfficeUI extends BasePanel {
 
   refresh(force = false): void {
     const s = this.state;
-    const sig = `${this.tab}|${Math.floor(s.money)}|${s.debt}|${s.day}|${s.negativeDays}|${s.lastReport?.day ?? 0}`;
+    const sig = `${this.tab}|${Math.floor(s.money)}|${s.debt}|${s.day}|${s.negativeDays}|${s.lastReport?.day ?? 0}|${s.policy}|${s.rosterMode}|${s.manualRoster.join(",")}|${Object.keys(s.hosts).length}|${s.tableCount}|${s.regulars.length}`;
     if (!force && sig === this.lastSig) return;
     this.lastSig = sig;
 
@@ -97,7 +101,110 @@ export class OfficeUI extends BasePanel {
 
     this.bodyEl.innerHTML = "";
     if (this.tab === "report") this.renderReportTab();
+    else if (this.tab === "roster") this.renderRosterTab();
     else this.renderFinanceTab();
+  }
+
+  private renderRosterTab(): void {
+    const s = this.state;
+    const wrap = document.createElement("div");
+    wrap.className = "roster";
+
+    // ---- つけ回し方針 ----
+    const ph = document.createElement("div");
+    ph.className = "finance-title";
+    ph.textContent = "つけ回し方針（営業中は卓の近くで E キーを押すと手動で入れ替えられます）";
+    wrap.appendChild(ph);
+    const policies = document.createElement("div");
+    policies.className = "policy-list";
+    for (const p of ASSIGN_POLICIES) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `policy${s.policy === p.key ? " active" : ""}`;
+      b.innerHTML = `<b>${p.label}</b><span>${p.desc}</span>`;
+      b.addEventListener("click", () => {
+        s.policy = p.key;
+        this.onChange();
+        this.refresh(true);
+      });
+      policies.appendChild(b);
+    }
+    wrap.appendChild(policies);
+
+    // ---- 出勤メンバー ----
+    const owned = s.ownedDefs();
+    const onFloor = new Set(s.onFloorDefs().map((d) => d.id));
+    const head = document.createElement("div");
+    head.className = "roster-head";
+    const rh = document.createElement("div");
+    rh.className = "finance-title";
+    rh.textContent = `出勤メンバー ${onFloor.size} / ${s.tableCount} 枠（${s.rosterMode === "auto" ? "自動: レア度順" : "手動"}）`;
+    head.appendChild(rh);
+    if (s.rosterMode === "manual") {
+      const auto = document.createElement("button");
+      auto.type = "button";
+      auto.className = "btn-gold";
+      auto.textContent = "自動に戻す";
+      auto.addEventListener("click", () => {
+        s.setRosterAuto();
+        this.onChange();
+        this.refresh(true);
+      });
+      head.appendChild(auto);
+    }
+    wrap.appendChild(head);
+
+    if (owned.length === 0) {
+      const none = document.createElement("div");
+      none.className = "office-empty";
+      none.textContent = "ホストがいません。ガチャ（G）で獲得してください。";
+      wrap.appendChild(none);
+    }
+
+    const note = document.createElement("div");
+    note.className = "finance-note";
+    note.textContent = `出勤させたホストにだけ給与（歩合 or 最低保証）が発生します。控えは無給で、開店時のスタミナ回復が多め（出勤 +${STAMINA.recoverOnFloor} ／ 控え +${STAMINA.recoverBench}）。スタミナが低いと接客効果が落ち、${STAMINA.minToServe} 未満では卓に着けません。`;
+    wrap.appendChild(note);
+
+    const list = document.createElement("div");
+    list.className = "roster-list";
+    for (const d of owned) {
+      const on = onFloor.has(d.id);
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = `roster-row${on ? " on" : ""}`;
+      row.dataset.rarity = d.rarity;
+      const stamina = s.stamina(d.id);
+      const regs = s.regularsOf(d.id).length;
+      const guarantee = hostGuaranteeFor(d.rarity, s.shopLevel);
+
+      const check = document.createElement("span");
+      check.className = "roster-check";
+      check.textContent = on ? "✔ 出勤" : "控え";
+      const info = document.createElement("span");
+      info.className = "roster-info";
+      info.innerHTML = `<b>${d.name}</b> <small>${d.rarity}・${d.race}${s.limitBreak(d.id) ? ` +${s.limitBreak(d.id)}` : ""}</small><br>
+        <small>${RACES[d.race].description}</small><br>
+        <small>歩合 ${Math.round(HOST_WAGE.rate[d.rarity] * 100)}% ／ 最低保証 ${formatG(guarantee)} ／ 太客 ${regs} 人</small>`;
+      const st = document.createElement("span");
+      st.className = "roster-stamina";
+      st.innerHTML = `<span class="assign-stamina"><span class="assign-stamina-bar${stamina < 30 ? " low" : ""}" style="width:${Math.round(stamina)}%"></span></span><small>スタミナ ${Math.round(stamina)}</small>`;
+
+      row.append(createPortrait(d, true, 2), check, info, st);
+      row.addEventListener("click", () => {
+        if (!s.toggleRoster(d.id)) {
+          row.classList.add("shake");
+          setTimeout(() => row.classList.remove("shake"), 300);
+          return;
+        }
+        this.onChange();
+        this.refresh(true);
+      });
+      list.appendChild(row);
+    }
+    wrap.appendChild(list);
+
+    this.bodyEl.appendChild(wrap);
   }
 
   private renderReportTab(): void {

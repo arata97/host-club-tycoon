@@ -12,10 +12,13 @@ export class Table {
   host: Host | null = null;
   /** 提供に向かっている内勤 */
   claimedBy: Staff | null = null;
+  /** 店長が手動で「ホストを外した」卓。この客が帰るまで自動つけ回しの対象外 */
+  autoBlocked = false;
   readonly w = 30;
   readonly h = 16;
 
   constructor(
+    public readonly index: number,
     public x: number,
     public y: number,
   ) {}
@@ -51,6 +54,6 @@ export class Table {
   /** ホストが着く価値がある（客がいて、まだホストがいない） */
   get wantsHost(): boolean {
     const c = this.customer;
-    return c !== null && c.phase !== "leaving" && c.phase !== "gone" && this.host === null;
+    return c !== null && c.phase !== "leaving" && c.phase !== "gone" && this.host === null && !this.autoBlocked;
   }
 }

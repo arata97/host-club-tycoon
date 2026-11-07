@@ -38,6 +38,90 @@ export function drawPerson(
   ctx.fillRect(px + 1, py - 1, 3, 2 - step);
 }
 
+/** 種族ごとの見た目の特徴。人間に見えないよう、ホスト・内勤・客すべてに付ける */
+export type RaceFeature = "elfEars" | "beastEars" | "horns" | "dragonHorns" | "wings" | "vampire" | "none";
+
+/**
+ * 特徴つきの人物。(x, y) は足元中央。
+ * 羽・マントは体の後ろ、耳・角・牙は前に描く。
+ */
+export function drawCreature(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  p: PersonPalette,
+  walkT: number,
+  facing: 1 | -1,
+  feature: RaceFeature,
+): void {
+  const px = Math.round(x);
+  const py = Math.round(y);
+  const moving = walkT > 0;
+  const bob = moving ? Math.round(Math.sin(walkT * 14)) : 0;
+  const flap = Math.round(Math.sin(walkT * 20 + px) * 1);
+
+  // ---- 後ろ ----
+  if (feature === "wings") {
+    ctx.fillStyle = "rgba(190,240,255,0.55)";
+    ctx.fillRect(px - 9, py - 15 + bob + flap, 4, 7);
+    ctx.fillRect(px + 5, py - 15 + bob + flap, 4, 7);
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.fillRect(px - 8, py - 14 + bob + flap, 1, 4);
+    ctx.fillRect(px + 7, py - 14 + bob + flap, 1, 4);
+  } else if (feature === "vampire") {
+    ctx.fillStyle = "#120812";
+    ctx.fillRect(px - 7, py - 12 + bob, 14, 10);
+    ctx.fillStyle = "#8a1030";
+    ctx.fillRect(px - 7, py - 12 + bob, 1, 10);
+    ctx.fillRect(px + 6, py - 12 + bob, 1, 10);
+    // 立て襟
+    ctx.fillStyle = "#120812";
+    ctx.fillRect(px - 6, py - 14 + bob, 2, 3);
+    ctx.fillRect(px + 4, py - 14 + bob, 2, 3);
+  }
+
+  drawPerson(ctx, x, y, p, walkT, facing);
+
+  // ---- 前 ----
+  switch (feature) {
+    case "elfEars":
+      ctx.fillStyle = p.skin;
+      ctx.fillRect(px - 6, py - 13 + bob, 2, 1);
+      ctx.fillRect(px - 7, py - 14 + bob, 1, 1);
+      ctx.fillRect(px + 4, py - 13 + bob, 2, 1);
+      ctx.fillRect(px + 6, py - 14 + bob, 1, 1);
+      break;
+    case "beastEars":
+      ctx.fillStyle = p.hair;
+      ctx.fillRect(px - 5, py - 21 + bob, 3, 3);
+      ctx.fillRect(px + 2, py - 21 + bob, 3, 3);
+      ctx.fillStyle = "#ffb3c6";
+      ctx.fillRect(px - 4, py - 20 + bob, 1, 1);
+      ctx.fillRect(px + 3, py - 20 + bob, 1, 1);
+      break;
+    case "horns":
+      ctx.fillStyle = "#f4e7c3";
+      ctx.fillRect(px - 4, py - 20 + bob, 2, 2);
+      ctx.fillRect(px - 4, py - 21 + bob, 1, 1);
+      ctx.fillRect(px + 2, py - 20 + bob, 2, 2);
+      ctx.fillRect(px + 3, py - 21 + bob, 1, 1);
+      break;
+    case "dragonHorns":
+      ctx.fillStyle = "#5a2a1a";
+      ctx.fillRect(px - 6, py - 20 + bob, 2, 3);
+      ctx.fillRect(px - 7, py - 22 + bob, 1, 2);
+      ctx.fillRect(px + 4, py - 20 + bob, 2, 3);
+      ctx.fillRect(px + 6, py - 22 + bob, 1, 2);
+      break;
+    case "vampire":
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(px + (facing > 0 ? 1 : -2), py - 11 + bob, 1, 1);
+      break;
+    default:
+      break;
+  }
+}
+
 /** 頭上に積んだボトルを描く */
 export function drawCarriedBottles(ctx: CanvasRenderingContext2D, x: number, y: number, count: number): void {
   const px = Math.round(x);

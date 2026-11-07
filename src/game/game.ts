@@ -2,6 +2,7 @@ import type { PixelCanvas } from "../engine/canvas";
 import type { Input } from "../engine/input";
 import type { Loopable } from "../engine/loop";
 import { drawScene, drawStick } from "../render/scene";
+import { AssignUI } from "../ui/assign";
 import { ClosingUI } from "../ui/closing";
 import { GachaUI } from "../ui/gacha";
 import { OfficeUI } from "../ui/office";
@@ -16,7 +17,7 @@ import { clearSave, GameState, loadSave, writeSave } from "./state";
 import { formatG } from "./util";
 import { World } from "./world";
 
-type PanelName = "office" | "shop" | "gacha" | "zukan";
+type PanelName = "office" | "shop" | "gacha" | "zukan" | "assign";
 
 const PANEL_KEYS: Record<string, PanelName> = {
   KeyO: "office",
@@ -25,8 +26,8 @@ const PANEL_KEYS: Record<string, PanelName> = {
   KeyZ: "zukan",
 };
 
-/** 開店前にしか開けないパネル */
-const PREOPEN_ONLY: ReadonlySet<PanelName> = new Set<PanelName>(["office", "shop", "gacha"]);
+/** 開店前にしか開けないパネル（ショップは営業中も使える） */
+const PREOPEN_ONLY: ReadonlySet<PanelName> = new Set<PanelName>(["office", "gacha"]);
 
 /**
  * ゲーム全体のオーケストレーション: 1日の状態機械・ワールド・UI・セーブ。
@@ -67,13 +68,21 @@ export class Game implements Loopable {
 
     const onChange = () => this.world.syncWithState();
     this.panels = {
-      office: new OfficeUI(this.state, () => this.openDay(), () => this.save()),
+      office: new OfficeUI(
+        this.state,
+        () => this.openDay(),
+        () => {
+          onChange();
+          this.save();
+        },
+      ),
       shop: new ShopUI(this.state, onChange, () => this.resetGame()),
       gacha: new GachaUI(this.state, () => {
         onChange();
         this.save();
       }),
       zukan: new ZukanUI(this.state),
+      assign: new AssignUI(this.state, () => this.world),
     };
     this.closing = new ClosingUI(
       this.state,
@@ -87,6 +96,7 @@ export class Game implements Loopable {
       if (name) this.togglePanel(name);
       if (e.code === "Escape") this.closeAllPanels();
       if (e.code === "Enter" && this.state.phase === "preopen") this.openDay();
+      if (e.code === "KeyE") this.toggleAssign();
     });
     for (const name of Object.keys(this.panels) as PanelName[]) {
       document.getElementById(`${name}-toggle`)?.addEventListener("click", () => this.togglePanel(name));
@@ -108,12 +118,35 @@ export class Game implements Loopable {
   openDay(): void {
     if (this.state.phase !== "preopen") return;
     this.closeAllPanels();
+    this.world.syncWithState();
+    this.state.recoverStaminaForDay(new Set(this.world.hosts.map((h) => h.def.id)));
     this.state.phase = "open";
     this.state.clockMin = 0;
     this.closingStarted = false;
     this.closeGraceT = 0;
     this.world.startDay();
     this.save();
+  }
+
+  /** E キー: 近くの卓のつけ回しポップアップを開閉 */
+  toggleAssign(): void {
+    const panel = this.panels.assign as AssignUI;
+    if (panel.isOpen) {
+      panel.close();
+      return;
+    }
+    if (this.state.phase !== "open") return;
+    const t = this.world.nearestTableForPlayer();
+    if (!t) {
+      this.flashHint("客のいる卓の前に立って E を押すと、つけ回しができます");
+      return;
+    }
+    if (this.world.hosts.length === 0) {
+      this.flashHint("出勤しているホストがいません（ガチャで獲得し、経営画面で出勤させてください）");
+      return;
+    }
+    this.closeAllPanels();
+    panel.openFor(t);
   }
 
   private settle(): void {
@@ -157,8 +190,12 @@ export class Game implements Loopable {
       p.close();
       return;
     }
+    if (name === "assign") {
+      this.toggleAssign();
+      return;
+    }
     if (PREOPEN_ONLY.has(name) && this.state.phase !== "preopen") {
-      this.flashHint("ショップ・ガチャ・経営画面は開店前にだけ使えます");
+      this.flashHint("ガチャ・経営画面は開店前にだけ使えます");
       return;
     }
     if (this.state.phase === "closing" || this.state.phase === "bankrupt") return;
@@ -252,7 +289,7 @@ export class Game implements Loopable {
       case "preopen":
         return "開店前: O 経営 / B ショップ / G ガチャ / Z 図鑑 ・ Enter で開店";
       case "open":
-        return "WASD / 矢印 / ドラッグで移動 ・ 酒蔵で回収、客席の前に立つと提供＆接客 ・ Z 図鑑";
+        return "WASD / 矢印 / ドラッグで移動 ・ 酒蔵で回収、客席の前で提供＆接客 ・ E つけ回し ・ B ショップ ・ Z 図鑑";
       default:
         return "";
     }

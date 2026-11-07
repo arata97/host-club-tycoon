@@ -1,4 +1,5 @@
 import { GACHA, RARITIES, type Rarity, rarityRank, SAVE, UPGRADES, type UpgradeKey, upgradeCost } from "./data/balance";
+import { type AssignPolicy, CUSTOMER_TYPES, type CustomerType, REGULAR, regularName, STAMINA } from "./data/customers";
 import { LOAN, startingCash } from "./data/economy";
 import { HOST_ROSTER, type HostDef } from "./data/hosts";
 import type { DayReport } from "./ledger";
@@ -6,10 +7,27 @@ import type { DayReport } from "./ledger";
 export interface OwnedHost {
   /** 限界突破段階（0〜GACHA.limitBreakMax） */
   lb: number;
+  /** スタミナ 0〜100 */
+  stamina: number;
+}
+
+/** 太客（常連）。特定のホストを指名して来店する */
+export interface Regular {
+  id: number;
+  name: string;
+  type: CustomerType;
+  /** 指名しているホスト */
+  hostId: string;
+  /** 好感度 0〜100。0 で店を離れる */
+  affinity: number;
+  visits: number;
 }
 
 /** 1日の中の状態。preopen=開店前（時間停止）、open=営業中、closing=閉店精算、bankrupt=倒産画面 */
 export type DayPhase = "preopen" | "open" | "closing" | "bankrupt";
+
+/** 出勤メンバーの決め方。auto=レア度順、manual=手動で選んだ人 */
+export type RosterMode = "auto" | "manual";
 
 /** セーブに含める永続データ。エンティティの瞬間的な位置などは含めない。 */
 export interface SaveData {
@@ -29,11 +47,17 @@ export interface SaveData {
   rebirths: number;
   recentSales: number[];
   lastReport: DayReport | null;
+  regulars: Regular[];
+  nextRegularId: number;
+  policy: AssignPolicy;
+  rosterMode: RosterMode;
+  manualRoster: string[];
   savedAt: number;
 }
 
 /** v2 セーブの「スカウト人数」を v3 の所持ホストに移行するときの順序 */
 const LEGACY_V2_SCOUT_ORDER = ["ren", "kakeru", "yuu", "garon", "rio", "rui"];
+const POLICIES: readonly AssignPolicy[] = ["affinity", "nomination", "rotation", "ace"];
 
 export class GameState {
   /** 現金 */
@@ -65,6 +89,13 @@ export class GameState {
   /** 直近の日次売上（借入上限の計算用） */
   recentSales: number[] = [];
   lastReport: DayReport | null = null;
+
+  // ---- 客・つけ回し ----
+  regulars: Regular[] = [];
+  nextRegularId = 1;
+  policy: AssignPolicy = "affinity";
+  rosterMode: RosterMode = "auto";
+  manualRoster: string[] = [];
 
   // ---------- 店舗 ----------
 
@@ -109,7 +140,6 @@ export class GameState {
     const recent = this.recentSales.slice(-LOAN.limitSalesDays).reduce((a, b) => a + b, 0);
     return LOAN.initialDebt + Math.max(LOAN.limitFloor, recent * LOAN.limitMultiplier);
   }
-  /** いま追加で借りられる額（上限 − 残高） */
   borrowable(): number {
     return Math.max(0, this.borrowLimit() - this.debt);
   }
@@ -132,16 +162,24 @@ export class GameState {
     if (this.recentSales.length > 30) this.recentSales.shift();
   }
 
-  /** 倒産 → 再転生。図鑑・天井・転生回数を引き継ぎ、店と金はリセット */
+  /** 倒産 → 再転生。図鑑・天井・転生回数を引き継ぎ、店・金・太客はリセット */
   reincarnate(): void {
-    const keep = { hosts: this.hosts, pity: this.pity, totalPulls: this.totalPulls, rebirths: this.rebirths + 1, totalRevenue: this.totalRevenue };
-    const fresh = new GameState();
-    Object.assign(this, fresh);
+    const keep = {
+      hosts: this.hosts,
+      pity: this.pity,
+      totalPulls: this.totalPulls,
+      rebirths: this.rebirths + 1,
+      totalRevenue: this.totalRevenue,
+      policy: this.policy,
+    };
+    Object.assign(this, new GameState());
     this.hosts = keep.hosts;
+    for (const h of Object.values(this.hosts)) h.stamina = STAMINA.max;
     this.pity = keep.pity;
     this.totalPulls = keep.totalPulls;
     this.rebirths = keep.rebirths;
     this.totalRevenue = keep.totalRevenue;
+    this.policy = keep.policy;
     this.money = startingCash(this.rebirths);
   }
 
@@ -153,19 +191,63 @@ export class GameState {
   limitBreak(id: string): number {
     return this.hosts[id]?.lb ?? 0;
   }
+  stamina(id: string): number {
+    return this.hosts[id]?.stamina ?? STAMINA.max;
+  }
   ownedDefs(): HostDef[] {
     return HOST_ROSTER.filter((d) => this.owns(d.id));
   }
-  onFloorDefs(): HostDef[] {
-    return HOST_ROSTER.map((d, i) => ({ d, i }))
-      .filter(({ d }) => this.owns(d.id))
-      .sort(
-        (a, b) =>
-          rarityRank(b.d.rarity) - rarityRank(a.d.rarity) || this.limitBreak(b.d.id) - this.limitBreak(a.d.id) || a.i - b.i,
-      )
-      .slice(0, this.tableCount)
-      .map(({ d }) => d);
+
+  /** レア度 → 限界突破 → 名簿順 */
+  private byRank(defs: HostDef[]): HostDef[] {
+    const idx = (d: HostDef) => HOST_ROSTER.indexOf(d);
+    return [...defs].sort(
+      (a, b) => rarityRank(b.rarity) - rarityRank(a.rarity) || this.limitBreak(b.id) - this.limitBreak(a.id) || idx(a) - idx(b),
+    );
   }
+
+  /** 自動で選んだ場合の出勤メンバー（レア度順にテーブル数ぶん） */
+  autoRoster(): HostDef[] {
+    return this.byRank(this.ownedDefs()).slice(0, this.tableCount);
+  }
+
+  /** 出勤メンバー。手動モードでは選んだ人だけ（枠を超えた分は切り捨て） */
+  onFloorDefs(): HostDef[] {
+    if (this.rosterMode === "auto") return this.autoRoster();
+    const picked = this.manualRoster.filter((id) => this.owns(id));
+    return this.byRank(HOST_ROSTER.filter((d) => picked.includes(d.id))).slice(0, this.tableCount);
+  }
+
+  /** 手動の出勤メンバーを切り替える。枠が埋まっていれば追加しない */
+  toggleRoster(id: string): boolean {
+    if (!this.owns(id)) return false;
+    if (this.rosterMode === "auto") {
+      this.rosterMode = "manual";
+      this.manualRoster = this.autoRoster().map((d) => d.id);
+    }
+    const i = this.manualRoster.indexOf(id);
+    if (i >= 0) {
+      this.manualRoster.splice(i, 1);
+      return true;
+    }
+    if (this.manualRoster.filter((x) => this.owns(x)).length >= this.tableCount) return false;
+    this.manualRoster.push(id);
+    return true;
+  }
+
+  setRosterAuto(): void {
+    this.rosterMode = "auto";
+    this.manualRoster = [];
+  }
+
+  /** 開店時のスタミナ回復: 出勤者は少し、控えは多く */
+  recoverStaminaForDay(onFloorIds: ReadonlySet<string>): void {
+    for (const [id, h] of Object.entries(this.hosts)) {
+      const gain = onFloorIds.has(id) ? STAMINA.recoverOnFloor : STAMINA.recoverBench;
+      h.stamina = Math.min(STAMINA.max, h.stamina + gain);
+    }
+  }
+
   isCollected(r: Rarity): boolean {
     const all = HOST_ROSTER.filter((d) => d.rarity === r);
     return all.length > 0 && all.every((d) => this.owns(d.id));
@@ -183,6 +265,25 @@ export class GameState {
   }
   spawnFactor(): number {
     return this.godOnFloor() ? GACHA.godSpawnFactor : 1;
+  }
+
+  // ---------- 太客 ----------
+
+  regularsOf(hostId: string): Regular[] {
+    return this.regulars.filter((r) => r.hostId === hostId);
+  }
+
+  /** 新しい太客を作る。ホストの上限に達していれば null */
+  addRegular(type: CustomerType, hostId: string): Regular | null {
+    if (this.regularsOf(hostId).length >= REGULAR.maxPerHost) return null;
+    const id = this.nextRegularId++;
+    const r: Regular = { id, name: regularName(type, id * 7 + this.day), type, hostId, affinity: REGULAR.initialAffinity, visits: 1 };
+    this.regulars.push(r);
+    return r;
+  }
+
+  removeRegular(id: number): void {
+    this.regulars = this.regulars.filter((r) => r.id !== id);
   }
 
   // ---------- セーブ ----------
@@ -205,6 +306,11 @@ export class GameState {
       rebirths: this.rebirths,
       recentSales: [...this.recentSales],
       lastReport: this.lastReport ? structuredClone(this.lastReport) : null,
+      regulars: structuredClone(this.regulars),
+      nextRegularId: this.nextRegularId,
+      policy: this.policy,
+      rosterMode: this.rosterMode,
+      manualRoster: [...this.manualRoster],
       savedAt: Date.now(),
     };
   }
@@ -221,12 +327,17 @@ export class GameState {
 
     if (data.v >= 3 && data.hosts && typeof data.hosts === "object") {
       for (const def of HOST_ROSTER) {
-        const h = data.hosts[def.id];
-        if (h) s.hosts[def.id] = { lb: clampInt(num(h.lb), 0, GACHA.limitBreakMax) };
+        const h = data.hosts[def.id] as Partial<OwnedHost> | undefined;
+        if (h) {
+          s.hosts[def.id] = {
+            lb: clampInt(num(h.lb), 0, GACHA.limitBreakMax),
+            stamina: h.stamina === undefined ? STAMINA.max : Math.max(0, Math.min(STAMINA.max, num(h.stamina))),
+          };
+        }
       }
     } else if (data.v === 2) {
       const scouted = clampInt(num((data.upgrades as Record<string, number> | undefined)?.host), 0, LEGACY_V2_SCOUT_ORDER.length);
-      for (const id of LEGACY_V2_SCOUT_ORDER.slice(0, scouted)) s.hosts[id] = { lb: 0 };
+      for (const id of LEGACY_V2_SCOUT_ORDER.slice(0, scouted)) s.hosts[id] = { lb: 0, stamina: STAMINA.max };
     }
 
     if (data.v >= 4) {
@@ -239,15 +350,30 @@ export class GameState {
       s.rebirths = clampInt(num(data.rebirths), 0, 1000);
       s.recentSales = Array.isArray(data.recentSales) ? data.recentSales.map(num).slice(-30) : [];
       s.lastReport = data.lastReport && typeof data.lastReport === "object" ? (data.lastReport as DayReport) : null;
-      // 営業中・精算中に保存されたデータは、開店前からやり直す（時刻は捨てる）
       if (s.phase === "open" || s.phase === "closing") {
         s.phase = "preopen";
         s.clockMin = 0;
       }
     } else {
-      // v2/v3 → v4: 営業日の概念がなかったので、開業資金を借りた状態の Day 1 開店前にする
       s.money = Math.max(num(data.money), startingCash(0));
       s.debt = LOAN.initialDebt;
+    }
+
+    if (data.v >= 5) {
+      s.regulars = (Array.isArray(data.regulars) ? data.regulars : [])
+        .filter((r) => r && s.owns(r.hostId) && CUSTOMER_TYPES.includes(r.type))
+        .map((r) => ({
+          id: clampInt(num(r.id), 1, Number.MAX_SAFE_INTEGER),
+          name: String(r.name ?? "常連"),
+          type: r.type,
+          hostId: r.hostId,
+          affinity: Math.max(1, Math.min(100, num(r.affinity))),
+          visits: clampInt(num(r.visits), 0, Number.MAX_SAFE_INTEGER),
+        }));
+      s.nextRegularId = Math.max(clampInt(num(data.nextRegularId), 1, Number.MAX_SAFE_INTEGER), ...s.regulars.map((r) => r.id + 1), 1);
+      s.policy = POLICIES.includes(data.policy as AssignPolicy) ? (data.policy as AssignPolicy) : "affinity";
+      s.rosterMode = data.rosterMode === "manual" ? "manual" : "auto";
+      s.manualRoster = Array.isArray(data.manualRoster) ? data.manualRoster.filter((id) => typeof id === "string" && s.owns(id)) : [];
     }
     return s;
   }

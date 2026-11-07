@@ -1,6 +1,6 @@
 import type { GameState } from "../game/state";
 import type { World } from "../game/world";
-import { drawCustomer, drawHost, drawPlayer, drawStaff } from "./entities";
+import { drawCustomer, drawHost, drawPlayer, drawPrompt, drawStaff } from "./entities";
 import { drawCellar, drawRoom, drawTable } from "./furniture";
 
 /**
@@ -21,6 +21,12 @@ export function drawScene(ctx: CanvasRenderingContext2D, world: World, state: Ga
   ];
   people.sort((a, b) => a.y - b.y);
   for (const p of people) p.draw();
+
+  // 卓の前に立ったら「E つけ回し」
+  if (state.phase === "open" && world.hosts.length > 0) {
+    const t = world.nearestTableForPlayer();
+    if (t) drawPrompt(ctx, world.player.x, world.player.y, `E つけ回し（${t.host ? t.host.name : "ホストなし"}）`);
+  }
 
   world.floats.draw(ctx);
 }

@@ -1,4 +1,5 @@
 import { GACHA, RARITIES, type Rarity } from "../game/data/balance";
+import { REGULAR } from "../game/data/customers";
 import { HOST_ROSTER, type HostDef } from "../game/data/hosts";
 import { RACES } from "../game/data/races";
 import { hostEffect } from "../game/entities/host";
@@ -32,7 +33,11 @@ export class ZukanUI extends BasePanel {
   refresh(force = false): void {
     const s = this.state;
     const onFloor = new Set(s.onFloorDefs().map((d) => d.id));
-    const sig = `${JSON.stringify(s.hosts)}|${s.tableCount}`;
+    const hostSig = Object.entries(s.hosts)
+      .map(([id, h]) => `${id}:${h.lb}:${Math.round(h.stamina / 5)}`)
+      .join(",");
+    const regSig = s.regulars.map((r) => `${r.id}:${Math.round(r.affinity)}`).join(",");
+    const sig = `${hostSig}|${regSig}|${s.tableCount}|${s.rosterMode}|${s.manualRoster.join(",")}`;
     if (!force && sig === this.lastSig) return;
     this.lastSig = sig;
 
@@ -119,17 +124,28 @@ export class ZukanUI extends BasePanel {
       const e = hostEffect(def, s.limitBreak(def.id));
       const stats = document.createElement("div");
       stats.className = "zcard-stats";
-      stats.textContent = `売上×${e.revenueMultiplier.toFixed(2)}　おかわり+${e.extraOrders}　グレード補正${e.orderBonus}`;
+      stats.textContent = `売上×${e.revenueMultiplier.toFixed(2)}　滞在延長+${e.extraOrders}　グレード補正${e.orderBonus}`;
       const passive = document.createElement("div");
       passive.className = "zcard-passive";
       passive.textContent = RACES[def.race].description;
       const profile = document.createElement("div");
       profile.className = "zcard-profile";
       profile.textContent = def.profile;
+      const stamina = Math.round(s.stamina(def.id));
+      const st = document.createElement("div");
+      st.className = "zcard-stamina";
+      st.innerHTML = `<span class="assign-stamina"><span class="assign-stamina-bar${stamina < 30 ? " low" : ""}" style="width:${stamina}%"></span></span> スタミナ ${stamina}`;
+      const regs = s.regularsOf(def.id);
+      const regEl = document.createElement("div");
+      regEl.className = "zcard-regulars";
+      regEl.textContent =
+        regs.length === 0
+          ? `太客 0 / ${REGULAR.maxPerHost}`
+          : `太客 ${regs.length} / ${REGULAR.maxPerHost}: ` + regs.map((r) => `${r.name}（${r.type}・♥${Math.round(r.affinity)}）`).join("、");
       const status = document.createElement("div");
       status.className = `zcard-status${floor ? " on" : ""}`;
-      status.textContent = floor ? "出勤中" : "控え（テーブルを増やすと出勤）";
-      card.append(stats, passive, profile, status);
+      status.textContent = floor ? "出勤中" : "控え";
+      card.append(stats, passive, profile, st, regEl, status);
     }
     return card;
   }

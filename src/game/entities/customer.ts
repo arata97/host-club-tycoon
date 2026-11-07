@@ -1,42 +1,59 @@
 import { CUSTOMER, type HostingEffect, PLAYER } from "../data/balance";
+import { affinityMultiplier, type CustomerType, REGULAR } from "../data/customers";
 import { STAY } from "../data/economy";
 import { type Grade, type Product, rollOrder } from "../data/products";
+import type { Regular } from "../state";
 import { moveToward } from "../util";
 import type { Host } from "./host";
 import type { Table } from "./table";
 
 export type CustomerPhase = "walking" | "waiting" | "drinking" | "leaving" | "gone";
 
+/** 退店の理由 */
+export type LeaveReason = "angry" | "budget" | "satisfied" | "closed";
+
+export interface CustomerInit {
+  type: CustomerType;
+  vip: boolean;
+  /** 予算（G）。注文のたびに減り、次の注文が払えなくなったら帰る */
+  budget: number;
+  /** 太客なら、その記録への参照 */
+  regular: Regular | null;
+}
+
 /**
  * 客。入口から席へ歩き、注文を待ち、飲んで支払う。
- * 滞在時間ベース: ホスト（または主人公）が着いていると滞在が延び、その間ずっと注文が続く。
- * 誰も着いていなければ1杯で帰る。
+ * 接客されていれば滞在中・予算の範囲でずっと注文が続く。誰も着いていなければ1杯で帰る。
  */
 export class Customer {
   phase: CustomerPhase = "walking";
-  /** 待ち残り時間（秒） */
+  readonly type: CustomerType;
+  readonly vip: boolean;
+  readonly regular: Regular | null;
+  /** 残り予算（G、全体倍率は含まない） */
+  budget: number;
+  readonly initialBudget: number;
+  /** 待ち残り時間（分） */
   patience = CUSTOMER.patience;
-  /** 現在の注文 */
   order: Product;
-  /** 飲んだ杯数 */
   drinksHad = 0;
-  /** 着席してからの経過（ゲーム内分＝秒） */
+  /** 来店してからの経過（分） */
+  ageMin = 0;
+  /** 着席してからの経過（分） */
   seatedMin = 0;
-  /** 基本滞在（接客なしの上限は1杯） */
   private readonly baseStayMin: number;
-  /** 着いているホスト */
   host: Host | null = null;
-  /** 主人公が卓に立って接客している */
   hostedByPlayer = false;
-  /** 直近に支払った金額（全体倍率は含まない） */
+  /** いちばん長く接客したホスト（太客化の判定用） */
+  servedById: string | null = null;
+  private servedTime: Record<string, number> = {};
+  /** 指名ホストに接客してもらえたか */
+  nominatedServed = false;
   lastPaid = 0;
-  /** 直近に支払った注文 */
   lastOrder: Product;
-  /** 帰る際に怒っていたか（未提供で退店） */
-  angry = false;
-  /** 閉店で帰された */
-  closedOut = false;
-  /** 見た目の種類（描画側でパレットを選ぶ） */
+  leaveReason: LeaveReason | null = null;
+  /** 退店処理（太客・好感度）を World が済ませたか */
+  departureHandled = false;
   readonly look = Math.floor(Math.random() * 1000);
 
   walkT = 0;
@@ -48,42 +65,66 @@ export class Customer {
     public y: number,
     public readonly table: Table,
     firstOrder: Product,
-    public readonly vip: boolean,
+    init: CustomerInit,
     private readonly maxGrade: Grade,
     private readonly exitX: number,
     private readonly exitY: number,
   ) {
     this.order = firstOrder;
     this.lastOrder = firstOrder;
+    this.type = init.type;
+    this.vip = init.vip;
+    this.regular = init.regular;
+    this.budget = init.budget;
+    this.initialBudget = init.budget;
     this.baseStayMin = STAY.baseMin + Math.random() * (STAY.baseMax - STAY.baseMin);
   }
 
+  get angry(): boolean {
+    return this.leaveReason === "angry";
+  }
   get hasHost(): boolean {
     return this.host !== null || this.hostedByPlayer;
   }
+  /** 指名しているホストの id（太客のみ） */
+  get nominatedHostId(): string | null {
+    return this.regular?.hostId ?? null;
+  }
 
-  /** 現在効いている接客効果 */
   get effect(): HostingEffect | null {
     if (this.host) return this.host.effect;
     if (this.hostedByPlayer) return PLAYER.hosting;
     return null;
   }
 
-  /** 接客込みの滞在上限（分） */
   get stayLimitMin(): number {
     const extra = this.effect?.extraOrders ?? 0;
     return Math.min(STAY.cap, this.baseStayMin + extra * STAY.perExtraOrder);
   }
 
-  /** 現在の注文の支払額（VIP倍率・接客倍率込み。全体倍率は World が掛ける） */
+  /** 着いているホストとの相性倍率 */
+  get affinity(): number {
+    return this.host ? affinityMultiplier(this.type, this.host.def.race) : 1;
+  }
+  get nominationMultiplier(): number {
+    return this.host && this.host.def.id === this.nominatedHostId ? REGULAR.nominationMultiplier : 1;
+  }
+
+  /** 注文の基本額（VIP倍率のみ。予算判定用） */
+  basePriceOf(p: Product): number {
+    return p.price * (this.vip ? CUSTOMER.vipMultiplier : 1);
+  }
+
+  /** 現在の注文の支払額（VIP・接客・相性・指名込み。全体倍率は World が掛ける） */
   get price(): number {
     const mult = this.effect?.revenueMultiplier ?? 1;
-    return Math.round(this.order.price * (this.vip ? CUSTOMER.vipMultiplier : 1) * mult);
+    return Math.round(this.basePriceOf(this.order) * mult * this.affinity * this.nominationMultiplier);
   }
 
   attachHost(host: Host): void {
     this.host = host;
     this.hostedByPlayer = false;
+    if (host.def.id === this.nominatedHostId) this.nominatedServed = true;
   }
 
   detachHost(): void {
@@ -98,7 +139,6 @@ export class Customer {
     this.hostedByPlayer = on;
   }
 
-  /** 提供を受ける。waiting のときだけ有効。 */
   serve(): boolean {
     if (this.phase !== "waiting") return false;
     this.phase = "drinking";
@@ -106,23 +146,23 @@ export class Customer {
     return true;
   }
 
-  /** 閉店。席にいれば帰る（飲みかけでも支払いはしない: 1杯ごとに支払い済み） */
   closeOut(): void {
-    if (this.phase === "walking" || this.phase === "waiting" || this.phase === "drinking") {
-      this.closedOut = true;
-      this.startLeaving();
-    }
+    if (this.phase === "walking" || this.phase === "waiting" || this.phase === "drinking") this.startLeaving("closed");
   }
 
   /**
-   * 1ステップ進める。戻り値はこのフレームで起きたイベント。
-   * - "paid": 1杯飲み終えて支払った（lastPaid を加算すること）
+   * 1ステップ進める（dt はゲーム内の分）。
+   * - "paid": 1杯飲み終えて支払った
    * - "gaveUp": 待ちきれずに帰り始めた
    * - "left": 入口に到達して消えた
    */
   update(dt: number): "paid" | "gaveUp" | "left" | null {
     const speed = CUSTOMER.walkSpeed;
-    if (this.phase === "waiting" || this.phase === "drinking") this.seatedMin += dt;
+    this.ageMin += dt;
+    if (this.phase === "waiting" || this.phase === "drinking") {
+      this.seatedMin += dt;
+      if (this.host) this.servedTime[this.host.def.id] = (this.servedTime[this.host.def.id] ?? 0) + dt;
+    }
     switch (this.phase) {
       case "walking": {
         if (this.walkTo(this.table.seatX, this.table.seatY, speed, dt)) {
@@ -132,11 +172,12 @@ export class Customer {
         return null;
       }
       case "waiting": {
-        const drain = this.effect?.patienceDrain ?? 1;
+        let drain = this.effect?.patienceDrain ?? 1;
+        // 指名客は誰も着いていないと倍速でいらだつ
+        if (this.regular && !this.hasHost) drain *= REGULAR.unattendedDrain;
         this.patience -= dt * drain;
         if (this.patience <= 0) {
-          this.angry = true;
-          this.startLeaving();
+          this.startLeaving("angry");
           return "gaveUp";
         }
         return null;
@@ -146,14 +187,19 @@ export class Customer {
         if (this.timer <= 0) {
           this.lastPaid = this.price;
           this.lastOrder = this.order;
+          this.budget -= this.basePriceOf(this.order);
           this.drinksHad += 1;
           if (this.hasHost && this.seatedMin < this.stayLimitMin) {
-            // おかわり: 接客されていて滞在時間が残っている
-            this.order = rollOrder(this.maxGrade, this.vip, this.effect?.orderBonus ?? 0);
-            this.patience = CUSTOMER.patience;
-            this.phase = "waiting";
+            const next = rollOrder(this.maxGrade, this.vip, this.effect?.orderBonus ?? 0);
+            if (this.basePriceOf(next) <= this.budget) {
+              this.order = next;
+              this.patience = CUSTOMER.patience;
+              this.phase = "waiting";
+            } else {
+              this.startLeaving("budget");
+            }
           } else {
-            this.startLeaving();
+            this.startLeaving("satisfied");
           }
           return "paid";
         }
@@ -179,11 +225,24 @@ export class Customer {
     return arrived;
   }
 
-  private startLeaving(): void {
+  private startLeaving(reason: LeaveReason): void {
+    this.leaveReason = reason;
+    // 最も長く接客したホスト
+    let best: string | null = null;
+    let bestT = 0;
+    for (const [id, t] of Object.entries(this.servedTime)) {
+      if (t > bestT) {
+        bestT = t;
+        best = id;
+      }
+    }
+    this.servedById = best;
+
     this.phase = "leaving";
     this.walkT = 0;
     if (this.table.customer === this) this.table.customer = null;
     this.table.claimedBy = null;
+    this.table.autoBlocked = false;
     const h = this.host;
     this.host = null;
     this.hostedByPlayer = false;

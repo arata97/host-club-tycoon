@@ -168,6 +168,6 @@ export function gachaPrice(shopLevel: number, multi: boolean): number {
 
 export const SAVE = {
   key: "hct-save",
-  version: 4,
+  version: 5,
   autosaveInterval: 30,
 } as const;
