@@ -1,22 +1,34 @@
 import { GACHA, RARITIES, type Rarity, rarityRank, SAVE, UPGRADES, type UpgradeKey, upgradeCost } from "./data/balance";
+import { LOAN, startingCash } from "./data/economy";
 import { HOST_ROSTER, type HostDef } from "./data/hosts";
+import type { DayReport } from "./ledger";
 
 export interface OwnedHost {
   /** 限界突破段階（0〜GACHA.limitBreakMax） */
   lb: number;
 }
 
+/** 1日の中の状態。preopen=開店前（時間停止）、open=営業中、closing=閉店精算、bankrupt=倒産画面 */
+export type DayPhase = "preopen" | "open" | "closing" | "bankrupt";
+
 /** セーブに含める永続データ。エンティティの瞬間的な位置などは含めない。 */
 export interface SaveData {
   v: number;
   money: number;
+  debt: number;
   totalRevenue: number;
   upgrades: Record<UpgradeKey, number>;
   shopLevel: number;
   hosts: Record<string, OwnedHost>;
-  /** 天井カウンター（天井対象レア度以上が出てからの連数） */
   pity: number;
   totalPulls: number;
+  day: number;
+  clockMin: number;
+  phase: DayPhase;
+  negativeDays: number;
+  rebirths: number;
+  recentSales: number[];
+  lastReport: DayReport | null;
   savedAt: number;
 }
 
@@ -24,9 +36,10 @@ export interface SaveData {
 const LEGACY_V2_SCOUT_ORDER = ["ren", "kakeru", "yuu", "garon", "rio", "rui"];
 
 export class GameState {
-  money = 0;
+  /** 現金 */
+  money = startingCash(0);
+  debt: number = LOAN.initialDebt;
   totalRevenue = 0;
-  /** 各アップグレードの購入回数 */
   upgrades: Record<UpgradeKey, number> = {
     table: 0,
     cellar: 0,
@@ -35,12 +48,23 @@ export class GameState {
     staff: 0,
     staffLv: 0,
   };
-  /** 現在の店舗（1〜5）。店舗解放はフェーズ3 */
+  /** 現在の店舗（1〜5）。店舗解放はフェーズ3d */
   shopLevel = 1;
-  /** 所持ホスト（id → 限界突破段階） */
   hosts: Record<string, OwnedHost> = {};
   pity = 0;
   totalPulls = 0;
+
+  // ---- 営業日 ----
+  day = 1;
+  /** 営業中の時刻（20:00 からの分） */
+  clockMin = 0;
+  phase: DayPhase = "preopen";
+  /** 閉店時に現金がマイナスだった連続日数 */
+  negativeDays = 0;
+  rebirths = 0;
+  /** 直近の日次売上（借入上限の計算用） */
+  recentSales: number[] = [];
+  lastReport: DayReport | null = null;
 
   // ---------- 店舗 ----------
 
@@ -66,7 +90,6 @@ export class GameState {
   canBuy(key: UpgradeKey): boolean {
     return !this.isMaxed(key) && this.money >= this.costOf(key);
   }
-  /** 購入を試みる。成功したら true */
   buy(key: UpgradeKey): boolean {
     if (!this.canBuy(key)) return false;
     this.money -= this.costOf(key);
@@ -77,6 +100,49 @@ export class GameState {
   earn(amount: number): void {
     this.money += amount;
     this.totalRevenue += amount;
+  }
+
+  // ---------- 借金 ----------
+
+  /** 借金残高の上限 ＝ 開業資金 ＋ max(下限, 直近7日の売上 × 倍率) */
+  borrowLimit(): number {
+    const recent = this.recentSales.slice(-LOAN.limitSalesDays).reduce((a, b) => a + b, 0);
+    return LOAN.initialDebt + Math.max(LOAN.limitFloor, recent * LOAN.limitMultiplier);
+  }
+  /** いま追加で借りられる額（上限 − 残高） */
+  borrowable(): number {
+    return Math.max(0, this.borrowLimit() - this.debt);
+  }
+  borrow(amount: number): boolean {
+    const a = Math.floor(amount);
+    if (a <= 0 || a > this.borrowable()) return false;
+    this.debt += a;
+    this.money += a;
+    return true;
+  }
+  repay(amount: number): boolean {
+    const a = Math.min(Math.floor(amount), this.debt, Math.floor(this.money));
+    if (a <= 0) return false;
+    this.debt -= a;
+    this.money -= a;
+    return true;
+  }
+  recordDaySales(sales: number): void {
+    this.recentSales.push(sales);
+    if (this.recentSales.length > 30) this.recentSales.shift();
+  }
+
+  /** 倒産 → 再転生。図鑑・天井・転生回数を引き継ぎ、店と金はリセット */
+  reincarnate(): void {
+    const keep = { hosts: this.hosts, pity: this.pity, totalPulls: this.totalPulls, rebirths: this.rebirths + 1, totalRevenue: this.totalRevenue };
+    const fresh = new GameState();
+    Object.assign(this, fresh);
+    this.hosts = keep.hosts;
+    this.pity = keep.pity;
+    this.totalPulls = keep.totalPulls;
+    this.rebirths = keep.rebirths;
+    this.totalRevenue = keep.totalRevenue;
+    this.money = startingCash(this.rebirths);
   }
 
   // ---------- ホスト ----------
@@ -90,11 +156,6 @@ export class GameState {
   ownedDefs(): HostDef[] {
     return HOST_ROSTER.filter((d) => this.owns(d.id));
   }
-
-  /**
-   * 出勤するホスト。所持ホストのうち「レア度 → 限界突破 → 名簿順」で上位から、
-   * テーブル数ぶんだけ。残りは控え。
-   */
   onFloorDefs(): HostDef[] {
     return HOST_ROSTER.map((d, i) => ({ d, i }))
       .filter(({ d }) => this.owns(d.id))
@@ -105,13 +166,10 @@ export class GameState {
       .slice(0, this.tableCount)
       .map(({ d }) => d);
   }
-
-  /** そのレア度のホストを全員所持しているか */
   isCollected(r: Rarity): boolean {
     const all = HOST_ROSTER.filter((d) => d.rarity === r);
     return all.length > 0 && all.every((d) => this.owns(d.id));
   }
-  /** 図鑑コンプによる全売上ボーナス（加算） */
   collectionBonus(): number {
     let bonus = 0;
     for (const r of RARITIES) if (this.isCollected(r)) bonus += GACHA.collectionBonus[r] ?? 0;
@@ -120,11 +178,9 @@ export class GameState {
   godOnFloor(): boolean {
     return this.onFloorDefs().some((d) => d.race === "神");
   }
-  /** 全売上にかかる倍率（図鑑コンプ＋神の出勤） */
   globalRevenueMultiplier(): number {
     return 1 + this.collectionBonus() + (this.godOnFloor() ? GACHA.godRevenueBonus : 0);
   }
-  /** 来店間隔にかかる係数 */
   spawnFactor(): number {
     return this.godOnFloor() ? GACHA.godSpawnFactor : 1;
   }
@@ -135,19 +191,26 @@ export class GameState {
     return {
       v: SAVE.version,
       money: this.money,
+      debt: this.debt,
       totalRevenue: this.totalRevenue,
       upgrades: { ...this.upgrades },
       shopLevel: this.shopLevel,
       hosts: structuredClone(this.hosts),
       pity: this.pity,
       totalPulls: this.totalPulls,
+      day: this.day,
+      clockMin: this.clockMin,
+      phase: this.phase,
+      negativeDays: this.negativeDays,
+      rebirths: this.rebirths,
+      recentSales: [...this.recentSales],
+      lastReport: this.lastReport ? structuredClone(this.lastReport) : null,
       savedAt: Date.now(),
     };
   }
 
   static fromSave(data: Partial<SaveData> & { v: number }): GameState {
     const s = new GameState();
-    s.money = num(data.money);
     s.totalRevenue = num(data.totalRevenue);
     for (const key of Object.keys(s.upgrades) as UpgradeKey[]) {
       s.upgrades[key] = clampInt(num(data.upgrades?.[key]), 0, UPGRADES[key].max);
@@ -162,14 +225,37 @@ export class GameState {
         if (h) s.hosts[def.id] = { lb: clampInt(num(h.lb), 0, GACHA.limitBreakMax) };
       }
     } else if (data.v === 2) {
-      // v2: ショップでスカウトした人数ぶん、名簿の先頭から所持扱いにする
       const scouted = clampInt(num((data.upgrades as Record<string, number> | undefined)?.host), 0, LEGACY_V2_SCOUT_ORDER.length);
       for (const id of LEGACY_V2_SCOUT_ORDER.slice(0, scouted)) s.hosts[id] = { lb: 0 };
+    }
+
+    if (data.v >= 4) {
+      s.money = num(data.money);
+      s.debt = Math.max(0, num(data.debt));
+      s.day = Math.max(1, clampInt(num(data.day) || 1, 1, Number.MAX_SAFE_INTEGER));
+      s.clockMin = Math.max(0, num(data.clockMin));
+      s.phase = isPhase(data.phase) ? data.phase : "preopen";
+      s.negativeDays = clampInt(num(data.negativeDays), 0, LOAN.bankruptDays);
+      s.rebirths = clampInt(num(data.rebirths), 0, 1000);
+      s.recentSales = Array.isArray(data.recentSales) ? data.recentSales.map(num).slice(-30) : [];
+      s.lastReport = data.lastReport && typeof data.lastReport === "object" ? (data.lastReport as DayReport) : null;
+      // 営業中・精算中に保存されたデータは、開店前からやり直す（時刻は捨てる）
+      if (s.phase === "open" || s.phase === "closing") {
+        s.phase = "preopen";
+        s.clockMin = 0;
+      }
+    } else {
+      // v2/v3 → v4: 営業日の概念がなかったので、開業資金を借りた状態の Day 1 開店前にする
+      s.money = Math.max(num(data.money), startingCash(0));
+      s.debt = LOAN.initialDebt;
     }
     return s;
   }
 }
 
+function isPhase(v: unknown): v is DayPhase {
+  return v === "preopen" || v === "open" || v === "closing" || v === "bankrupt";
+}
 function num(v: unknown): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -186,7 +272,6 @@ export function loadSave(): (Partial<SaveData> & { v: number }) | null {
     if (!raw) return null;
     const data = JSON.parse(raw) as Partial<SaveData>;
     if (typeof data !== "object" || data === null || typeof data.v !== "number") return null;
-    // v2 以降は移行可能。v1 は互換性なし
     if (data.v < 2 || data.v > SAVE.version) return null;
     return data as Partial<SaveData> & { v: number };
   } catch {

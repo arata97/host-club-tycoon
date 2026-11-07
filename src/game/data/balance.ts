@@ -38,10 +38,10 @@ export const CUSTOMER = {
   /** 来店間隔（秒）。テーブル数が増えるほど短くなる */
   spawnIntervalBase: 7,
   spawnIntervalMin: 2.5,
-  /** 注文を待てる時間（秒）。超えると帰る */
-  patience: 30,
-  /** 飲んでいる時間（秒） */
-  drinkTime: 4,
+  /** 注文を待てる時間（ゲーム内分＝秒）。超えると帰る */
+  patience: 20,
+  /** 1杯を飲む時間（ゲーム内分＝秒） */
+  drinkTime: 12,
   /** 歩行速度（論理px/秒） */
   walkSpeed: 55,
   vipChance: 0.05,
@@ -168,6 +168,6 @@ export function gachaPrice(shopLevel: number, multi: boolean): number {
 
 export const SAVE = {
   key: "hct-save",
-  version: 3,
+  version: 4,
   autosaveInterval: 30,
 } as const;

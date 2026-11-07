@@ -10,19 +10,30 @@
     <div id="app">
       <canvas id="game"></canvas>
       <div id="hud">
-        <span id="hud-shop">場末の酒場「はじまりの灯」</span>
-        <span id="hud-money">0 G</span>
-        <span id="hud-carry">🍾 0/2</span>
-        <span id="hud-hosts">ホスト 0/1</span>
-        <button id="shop-toggle" class="hud-btn" type="button">ショップ (B)</button>
-        <button id="gacha-toggle" class="hud-btn gacha" type="button">ガチャ (G)</button>
-        <button id="zukan-toggle" class="hud-btn zukan" type="button">図鑑 (Z)</button>
+        <div class="hud-row">
+          <span id="hud-day">Day 1</span>
+          <span id="hud-clockwrap"><span id="hud-clock">開店前</span><span id="hud-clocktrack"><span id="hud-clockbar"></span></span></span>
+          <span id="hud-shop">場末の酒場「はじまりの灯」</span>
+        </div>
+        <div class="hud-row">
+          <span id="hud-money">0 G</span>
+          <span id="hud-debt">借金 0 G</span>
+          <span id="hud-carry">🍾 0/2</span>
+          <span id="hud-hosts">ホスト 0/1</span>
+          <button id="office-toggle" class="hud-btn office" type="button">経営 (O)</button>
+          <button id="shop-toggle" class="hud-btn" type="button">ショップ (B)</button>
+          <button id="gacha-toggle" class="hud-btn gacha" type="button">ガチャ (G)</button>
+          <button id="zukan-toggle" class="hud-btn zukan" type="button">図鑑 (Z)</button>
+          <button id="open-btn" class="hud-btn open" type="button" hidden>開店 (Enter)</button>
+        </div>
       </div>
       <div id="hud-sale"></div>
+      <div id="office" class="panel wide"></div>
       <div id="shop" class="panel"></div>
       <div id="gacha" class="panel wide"></div>
       <div id="zukan" class="panel wide"></div>
-      <div id="hint">WASD / 矢印キー または マウスドラッグで移動 ・ 酒蔵で回収、客席の前に立つと提供＆接客</div>
+      <div id="closing" class="overlay"></div>
+      <div id="hint"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
