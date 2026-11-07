@@ -4,3 +4,6 @@ src-tauri/target/
 .DS_Store
 *.log
 .env
+
+# macOS AppleDouble (exFAT 等)
+._*
