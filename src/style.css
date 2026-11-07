@@ -1,9 +1,12 @@
 :root {
   color-scheme: dark;
   --bg: #0b0810;
-  --hud-bg: rgba(10, 6, 20, 0.85);
-  --hud-fg: #f4e7c3;
+  --panel: rgba(14, 9, 24, 0.94);
+  --panel-border: #3a2a4f;
+  --fg: #f4e7c3;
+  --muted: #8a7fa0;
   --gold: #f6c453;
+  --accent: #c94f7c;
   font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
 }
 
@@ -37,27 +40,49 @@ body {
   cursor: crosshair;
 }
 
+/* ---------- HUD ---------- */
+
 #hud {
   position: absolute;
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 24px;
-  padding: 8px 18px;
-  background: var(--hud-bg);
-  color: var(--hud-fg);
-  border: 2px solid #3a2a4f;
+  align-items: center;
+  gap: 20px;
+  padding: 6px 14px;
+  background: var(--panel);
+  color: var(--fg);
+  border: 2px solid var(--panel-border);
   border-radius: 6px;
   font-size: 14px;
   letter-spacing: 0.02em;
-  pointer-events: none;
 }
 
 #hud-money {
   color: var(--gold);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  min-width: 7em;
+  text-align: right;
+}
+
+#hud-carry {
+  color: #8fd3ff;
+  font-variant-numeric: tabular-nums;
+}
+
+#hud-sale {
+  position: absolute;
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--gold);
+  font-size: 12px;
+  text-shadow: 0 1px 0 #000;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 #hint {
@@ -65,7 +90,153 @@ body {
   bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
-  color: #8a7fa0;
+  color: var(--muted);
   font-size: 12px;
   pointer-events: none;
+  white-space: nowrap;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+#shop-toggle {
+  padding: 4px 12px;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+#shop-toggle:hover {
+  filter: brightness(1.1);
+}
+
+/* ---------- ショップ ---------- */
+
+.shop {
+  position: absolute;
+  right: 24px;
+  top: 70px;
+  width: 360px;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 8px;
+  color: var(--fg);
+  padding: 14px;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+.shop.open {
+  display: flex;
+}
+
+.shop-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.shop-head h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--gold);
+}
+.shop-hint {
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1;
+}
+.shop-close {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.shop-close:hover {
+  color: var(--fg);
+}
+
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shop-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+.shop-info {
+  flex: 1;
+  min-width: 0;
+}
+.shop-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.shop-level {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.shop-effect {
+  font-size: 11px;
+  color: #c9bfdc;
+  margin-top: 2px;
+}
+
+.shop-buy {
+  min-width: 96px;
+  padding: 6px 10px;
+  background: var(--gold);
+  color: #2a1f3d;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.shop-buy:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.shop-buy:disabled {
+  background: #3a3350;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.shop-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  padding-top: 6px;
+  border-top: 1px solid var(--panel-border);
+}
+.shop-reset {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+.shop-reset:hover {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
 }

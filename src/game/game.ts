@@ -1,58 +1,92 @@
-import { LOGICAL_H, LOGICAL_W, type PixelCanvas } from "../engine/canvas";
+import type { PixelCanvas } from "../engine/canvas";
 import type { Input } from "../engine/input";
 import type { Loopable } from "../engine/loop";
+import { ShopUI } from "../ui/shop";
+import { SAVE } from "./data/balance";
 import { Player } from "./player";
+import { clearSave, GameState, loadSave, writeSave } from "./state";
+import { formatG } from "./util";
+import { World } from "./world";
 
 /**
- * ゲーム全体の状態と描画。Phase 0: 店の床と主人公だけ。
+ * ゲーム全体のオーケストレーション: 状態・ワールド・UI・セーブ。
  */
 export class Game implements Loopable {
-  readonly player = new Player(LOGICAL_W / 2, LOGICAL_H / 2);
-  money = 0;
-  private readonly hudMoney: HTMLElement | null;
+  readonly state: GameState;
+  readonly world: World;
+  private readonly shop: ShopUI;
+  private autosaveT = 0;
+  /** リセット中は beforeunload などで再保存しない */
+  private suppressSave = false;
+  private readonly hud = {
+    money: document.getElementById("hud-money"),
+    carry: document.getElementById("hud-carry"),
+    sale: document.getElementById("hud-sale"),
+  };
 
   constructor(
-    private canvas: PixelCanvas,
-    private input: Input,
+    private readonly canvas: PixelCanvas,
+    private readonly input: Input,
   ) {
-    this.hudMoney = document.getElementById("hud-money");
+    const saved = loadSave();
+    this.state = saved ? GameState.fromSave(saved) : new GameState();
+    this.world = new World(this.state);
+    this.shop = new ShopUI(
+      this.state,
+      () => this.world.syncWithState(),
+      () => this.resetGame(),
+    );
+
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "KeyB") this.shop.toggle();
+      if (e.code === "Escape") this.shop.close();
+    });
+    window.addEventListener("beforeunload", () => this.save());
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) this.save();
+    });
   }
 
   update(dt: number): void {
-    this.player.update(dt, this.input.axis(), { w: LOGICAL_W, h: LOGICAL_H });
+    // ショップを開いている間は入力を止める（シミュレーションは進む）
+    const axis = this.shop.isOpen ? { x: 0, y: 0 } : this.input.axis();
+    this.world.update(dt, axis);
+
+    this.autosaveT += dt;
+    if (this.autosaveT >= SAVE.autosaveInterval) {
+      this.autosaveT = 0;
+      this.save();
+    }
   }
 
   render(_alpha: number): void {
     const ctx = this.canvas.ctx;
-    this.drawFloor(ctx);
-    this.player.draw(ctx);
+    this.world.render(ctx);
     this.drawStick(ctx);
-    if (this.hudMoney) this.hudMoney.textContent = `${this.money.toLocaleString("ja-JP")} G`;
+    this.updateHud();
+    this.shop.refresh();
   }
 
-  private drawFloor(ctx: CanvasRenderingContext2D): void {
-    // 壁
-    ctx.fillStyle = "#2a1f3d";
-    ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
-    // 床（市松模様の絨毯）
-    const tile = 20;
-    for (let y = 40; y < LOGICAL_H; y += tile) {
-      for (let x = 0; x < LOGICAL_W; x += tile) {
-        const odd = ((x / tile + y / tile) & 1) === 1;
-        ctx.fillStyle = odd ? "#5a1f33" : "#4d1a2b";
-        ctx.fillRect(x, y, tile, tile);
-      }
-    }
-    // 壁の腰板
-    ctx.fillStyle = "#3d2b55";
-    ctx.fillRect(0, 34, LOGICAL_W, 6);
-    // 壁のライト
-    ctx.fillStyle = "#f6c453";
-    for (let x = 30; x < LOGICAL_W; x += 60) {
-      ctx.fillRect(x, 14, 4, 6);
-      ctx.fillStyle = "rgba(246,196,83,0.15)";
-      ctx.fillRect(x - 8, 20, 20, 14);
-      ctx.fillStyle = "#f6c453";
+  save(): void {
+    if (this.suppressSave) return;
+    writeSave(this.state.toSave());
+  }
+
+  /** セーブを消して最初から。リロードで全状態を作り直す。 */
+  resetGame(): void {
+    this.suppressSave = true;
+    clearSave();
+    location.reload();
+  }
+
+  private updateHud(): void {
+    const { money, carry, sale } = this.hud;
+    if (money) money.textContent = formatG(this.state.money);
+    if (carry) carry.textContent = `🍾 ${this.world.player.carrying}/${Player.carryFor(this.state.upgrades.carry)}`;
+    if (sale) {
+      const s = this.world.lastSale;
+      sale.textContent = s ? s.text : "";
+      sale.style.opacity = s ? String(Math.min(1, s.t)) : "0";
     }
   }
 

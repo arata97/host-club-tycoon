@@ -10,3 +10,8 @@ const canvas = new PixelCanvas(el);
 const input = new Input(canvas);
 const game = new Game(canvas, input);
 new GameLoop(game).start();
+
+// 開発時のみ: ブラウザコンソールからデバッグできるように公開
+if (import.meta.env.DEV) {
+  (window as unknown as { __game: Game }).__game = game;
+}
