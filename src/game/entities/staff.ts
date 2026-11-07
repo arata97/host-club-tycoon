@@ -1,11 +1,9 @@
 import { CELLAR, PLAYER, STAFF } from "../data/balance";
-import { distance, drawCarriedBottles, drawPerson, moveToward, type PersonPalette } from "../util";
+import { distance, moveToward } from "../util";
 import type { Cellar } from "./cellar";
 import type { Table } from "./table";
 
 type StaffPhase = "idle" | "toCellar" | "collecting" | "toTable";
-
-const STAFF_PALETTE: PersonPalette = { suit: "#141020", shirt: "#e8e8f0", skin: "#f1c9a5", hair: "#2a2a2a" };
 
 /** 内勤が参照するワールドの最小インターフェース */
 export interface StaffWorld {
@@ -24,10 +22,10 @@ export interface StaffWorld {
  */
 export class Staff {
   carrying = 0;
+  walkT = 0;
+  facing: 1 | -1 = 1;
   private phase: StaffPhase = "idle";
   private target: Table | null = null;
-  private walkT = 0;
-  private facing: 1 | -1 = 1;
   private actionT = 0;
 
   constructor(
@@ -123,19 +121,6 @@ export class Staff {
     if (this.x !== prevX) this.facing = this.x > prevX ? 1 : -1;
     this.walkT = arrived ? 0 : this.walkT + dt;
     return arrived;
-  }
-
-  draw(ctx: CanvasRenderingContext2D): void {
-    drawPerson(ctx, this.x, this.y, STAFF_PALETTE, this.walkT, this.facing);
-    drawCarriedBottles(ctx, this.x, this.y, this.carrying);
-    // 蝶ネクタイ
-    ctx.fillStyle = "#c94f7c";
-    ctx.fillRect(Math.round(this.x) - 1, Math.round(this.y) - 10, 2, 1);
-    ctx.font = "6px monospace";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(200,200,220,0.75)";
-    ctx.fillText(this.name, Math.round(this.x), Math.round(this.y) + 9);
-    ctx.textAlign = "left";
   }
 }
 

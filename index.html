@@ -13,10 +13,15 @@
         <span id="hud-shop">場末の酒場「はじまりの灯」</span>
         <span id="hud-money">0 G</span>
         <span id="hud-carry">🍾 0/2</span>
-        <button id="shop-toggle" type="button">ショップ (B)</button>
+        <span id="hud-hosts">ホスト 0/1</span>
+        <button id="shop-toggle" class="hud-btn" type="button">ショップ (B)</button>
+        <button id="gacha-toggle" class="hud-btn gacha" type="button">ガチャ (G)</button>
+        <button id="zukan-toggle" class="hud-btn zukan" type="button">図鑑 (Z)</button>
       </div>
       <div id="hud-sale"></div>
-      <div id="shop" class="shop"></div>
+      <div id="shop" class="panel"></div>
+      <div id="gacha" class="panel wide"></div>
+      <div id="zukan" class="panel wide"></div>
       <div id="hint">WASD / 矢印キー または マウスドラッグで移動 ・ 酒蔵で回収、客席の前に立つと提供＆接客</div>
     </div>
     <script type="module" src="/src/main.ts"></script>

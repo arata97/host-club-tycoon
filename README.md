@@ -37,17 +37,40 @@ npm run tauri build  # 配布用バイナリ作成（src-tauri/target/release/bu
 ## 構成
 
 ```
-index.html            エントリ HTML（Canvas + HUD）
+index.html              エントリ HTML（Canvas + HUD + パネル）
 src/
-  main.ts             起動処理
-  style.css
-  engine/
-    canvas.ts         低解像度 Canvas の整数倍スケーリング
-    input.ts          WASD / 矢印キー + マウスドラッグ仮想スティック
-    loop.ts           固定ステップ更新のゲームループ
-  game/
-    game.ts           ゲーム状態と描画
-    player.ts         主人公
-src-tauri/            Tauri（Rust）側。ウィンドウ設定・権限・バンドル設定
-.github/workflows/    CI（型チェック・Web ビルド・macOS/Windows の Tauri ビルド）
+  main.ts               起動処理
+  style.css             HUD・パネル（ショップ／ガチャ／図鑑）のスタイル
+  engine/               汎用（ゲーム内容に依存しない）
+    canvas.ts           低解像度 Canvas の整数倍スケーリング
+    input.ts            WASD / 矢印キー + マウスドラッグ仮想スティック
+    loop.ts             固定ステップ更新のゲームループ
+  game/                 ゲームロジック（描画しない）
+    game.ts             状態・ワールド・UI・セーブのまとめ役
+    world.ts            フロアのシミュレーション
+    state.ts            永続データとセーブ（localStorage）
+    gacha.ts            ガチャ（排出・天井・限界突破）
+    layout.ts           店内の座標
+    data/               バランス定数・商品・ホスト名簿・種族
+    entities/           酒蔵・テーブル・客・内勤・ホスト
+  render/               描画だけ（グラフィック差し替え時はここを触る）
+    scene.ts            1フレーム分の描画の入口
+    entities.ts         人物の描画
+    furniture.ts        床・壁・テーブル・酒蔵
+    people.ts           ドット絵の人物パーツ
+    palette.ts          配色
+    fx.ts               浮かび上がるテキスト
+  ui/                   HTML パネル（ショップ／ガチャ／図鑑）
+src-tauri/              Tauri（Rust）側。ウィンドウ設定・権限・バンドル設定
+.github/workflows/      CI（型チェック・Web ビルド・macOS/Windows の Tauri ビルド）
 ```
+
+### 操作
+
+| キー | 動作 |
+|---|---|
+| WASD / 矢印 / マウスドラッグ | 移動 |
+| B | ショップ |
+| G | ガチャ |
+| Z | 図鑑 |
+| Esc | パネルを閉じる |

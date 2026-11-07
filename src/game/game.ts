@@ -1,12 +1,24 @@
 import type { PixelCanvas } from "../engine/canvas";
 import type { Input } from "../engine/input";
 import type { Loopable } from "../engine/loop";
+import { drawScene, drawStick } from "../render/scene";
+import { GachaUI } from "../ui/gacha";
+import type { Panel } from "../ui/panel";
 import { ShopUI } from "../ui/shop";
+import { ZukanUI } from "../ui/zukan";
 import { SAVE } from "./data/balance";
 import { Player } from "./player";
 import { clearSave, GameState, loadSave, writeSave } from "./state";
 import { formatG } from "./util";
 import { World } from "./world";
+
+type PanelName = "shop" | "gacha" | "zukan";
+
+const PANEL_KEYS: Record<string, PanelName> = {
+  KeyB: "shop",
+  KeyG: "gacha",
+  KeyZ: "zukan",
+};
 
 /**
  * ゲーム全体のオーケストレーション: 状態・ワールド・UI・セーブ。
@@ -14,7 +26,7 @@ import { World } from "./world";
 export class Game implements Loopable {
   readonly state: GameState;
   readonly world: World;
-  private readonly shop: ShopUI;
+  private readonly panels: Record<PanelName, Panel>;
   private autosaveT = 0;
   /** リセット中は beforeunload などで再保存しない */
   private suppressSave = false;
@@ -22,6 +34,7 @@ export class Game implements Loopable {
     money: document.getElementById("hud-money"),
     carry: document.getElementById("hud-carry"),
     sale: document.getElementById("hud-sale"),
+    hosts: document.getElementById("hud-hosts"),
   };
 
   constructor(
@@ -31,25 +44,55 @@ export class Game implements Loopable {
     const saved = loadSave();
     this.state = saved ? GameState.fromSave(saved) : new GameState();
     this.world = new World(this.state);
-    this.shop = new ShopUI(
-      this.state,
-      () => this.world.syncWithState(),
-      () => this.resetGame(),
-    );
+
+    const onChange = () => this.world.syncWithState();
+    this.panels = {
+      shop: new ShopUI(this.state, onChange, () => this.resetGame()),
+      gacha: new GachaUI(this.state, () => {
+        onChange();
+        this.save();
+      }),
+      zukan: new ZukanUI(this.state),
+    };
 
     window.addEventListener("keydown", (e) => {
-      if (e.code === "KeyB") this.shop.toggle();
-      if (e.code === "Escape") this.shop.close();
+      if (e.repeat) return;
+      const name = PANEL_KEYS[e.code];
+      if (name) this.togglePanel(name);
+      if (e.code === "Escape") this.closeAllPanels();
     });
+    for (const name of Object.keys(this.panels) as PanelName[]) {
+      document.getElementById(`${name}-toggle`)?.addEventListener("click", () => this.togglePanel(name));
+    }
+
     window.addEventListener("beforeunload", () => this.save());
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) this.save();
     });
   }
 
+  /** パネルは同時に1つだけ開く */
+  togglePanel(name: PanelName): void {
+    const p = this.panels[name];
+    if (p.isOpen) {
+      p.close();
+      return;
+    }
+    this.closeAllPanels();
+    p.openPanel();
+  }
+
+  closeAllPanels(): void {
+    for (const p of Object.values(this.panels)) p.close();
+  }
+
+  private get anyPanelOpen(): boolean {
+    return Object.values(this.panels).some((p) => p.isOpen);
+  }
+
   update(dt: number): void {
-    // ショップを開いている間は入力を止める（シミュレーションは進む）
-    const axis = this.shop.isOpen ? { x: 0, y: 0 } : this.input.axis();
+    // パネルを開いている間は移動入力を止める（シミュレーションは進む）
+    const axis = this.anyPanelOpen ? { x: 0, y: 0 } : this.input.axis();
     this.world.update(dt, axis);
 
     this.autosaveT += dt;
@@ -61,10 +104,10 @@ export class Game implements Loopable {
 
   render(_alpha: number): void {
     const ctx = this.canvas.ctx;
-    this.world.render(ctx);
-    this.drawStick(ctx);
+    drawScene(ctx, this.world, this.state);
+    drawStick(ctx, this.input.stick(), this.input.stickRadius);
     this.updateHud();
-    this.shop.refresh();
+    for (const p of Object.values(this.panels)) if (p.isOpen) p.refresh();
   }
 
   save(): void {
@@ -80,32 +123,14 @@ export class Game implements Loopable {
   }
 
   private updateHud(): void {
-    const { money, carry, sale } = this.hud;
+    const { money, carry, sale, hosts } = this.hud;
     if (money) money.textContent = formatG(this.state.money);
     if (carry) carry.textContent = `🍾 ${this.world.player.carrying}/${Player.carryFor(this.state.upgrades.carry)}`;
+    if (hosts) hosts.textContent = `ホスト ${this.world.hosts.length}/${this.state.tableCount}`;
     if (sale) {
       const s = this.world.lastSale;
       sale.textContent = s ? s.text : "";
       sale.style.opacity = s ? String(Math.min(1, s.t)) : "0";
     }
-  }
-
-  private drawStick(ctx: CanvasRenderingContext2D): void {
-    const s = this.input.stick();
-    if (!s) return;
-    const r = this.input.stickRadius;
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(s.origin.x, s.origin.y, r, 0, Math.PI * 2);
-    ctx.stroke();
-    const dx = s.current.x - s.origin.x;
-    const dy = s.current.y - s.origin.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const k = Math.min(1, len / r) * r;
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.beginPath();
-    ctx.arc(s.origin.x + (dx / len) * k, s.origin.y + (dy / len) * k, 6, 0, Math.PI * 2);
-    ctx.fill();
   }
 }

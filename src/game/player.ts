@@ -1,16 +1,13 @@
 import type { Vec2 } from "../engine/input";
 import { PLAYER } from "./data/balance";
-import { drawCarriedBottles, drawPerson, type PersonPalette } from "./util";
 
-const PLAYER_PALETTE: PersonPalette = { suit: "#1c1826", shirt: "#f4f0ff", skin: "#f1c9a5", hair: "#d9a441" };
-
-/** 主人公。移動と運搬。 */
+/** 主人公（店長）。移動と運搬。提供・接客の判定は World が行う。 */
 export class Player {
   x: number;
   y: number;
   carrying = 0;
   facing: 1 | -1 = 1;
-  private walkT = 0;
+  walkT = 0;
 
   constructor(x: number, y: number) {
     this.x = x;
@@ -33,10 +30,5 @@ export class Player {
 
     this.x = Math.max(6, Math.min(bounds.w - 6, this.x));
     this.y = Math.max(bounds.top, Math.min(bounds.h - 2, this.y));
-  }
-
-  draw(ctx: CanvasRenderingContext2D): void {
-    drawPerson(ctx, this.x, this.y, PLAYER_PALETTE, this.walkT, this.facing);
-    drawCarriedBottles(ctx, this.x, this.y, this.carrying);
   }
 }

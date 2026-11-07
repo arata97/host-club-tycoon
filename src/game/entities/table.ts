@@ -8,7 +8,7 @@ import type { Staff } from "./staff";
  */
 export class Table {
   customer: Customer | null = null;
-  /** 着いているホスト */
+  /** 着いている（向かっている）ホスト */
   host: Host | null = null;
   /** 提供に向かっている内勤 */
   claimedBy: Staff | null = null;
@@ -50,28 +50,7 @@ export class Table {
   }
   /** ホストが着く価値がある（客がいて、まだホストがいない） */
   get wantsHost(): boolean {
-    return this.customer !== null && this.customer.phase !== "leaving" && this.customer.phase !== "gone" && this.host === null;
-  }
-
-  draw(ctx: CanvasRenderingContext2D): void {
-    const x = Math.round(this.x - this.w / 2);
-    const y = Math.round(this.y - this.h / 2);
-    // ソファ（奥）
-    ctx.fillStyle = "#7a1f3a";
-    ctx.fillRect(x - 4, y - 10, this.w + 8, 8);
-    ctx.fillStyle = "#a02a4e";
-    ctx.fillRect(x - 4, y - 10, this.w + 8, 2);
-    // テーブル
-    ctx.fillStyle = "#1e1a2a";
-    ctx.fillRect(x, y + 2, this.w, this.h);
-    ctx.fillStyle = "#3a3350";
-    ctx.fillRect(x, y, this.w, this.h);
-    ctx.fillStyle = "#5c5378";
-    ctx.fillRect(x + 1, y + 1, this.w - 2, 2);
-    // キャンドル
-    ctx.fillStyle = "#f6c453";
-    ctx.fillRect(Math.round(this.x), y + 5, 2, 3);
-    ctx.fillStyle = "#fff2b0";
-    ctx.fillRect(Math.round(this.x), y + 4, 2, 1);
+    const c = this.customer;
+    return c !== null && c.phase !== "leaving" && c.phase !== "gone" && this.host === null;
   }
 }

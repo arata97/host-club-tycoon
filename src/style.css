@@ -1,12 +1,18 @@
 :root {
   color-scheme: dark;
   --bg: #0b0810;
-  --panel: rgba(14, 9, 24, 0.94);
+  --panel: rgba(14, 9, 24, 0.95);
   --panel-border: #3a2a4f;
   --fg: #f4e7c3;
   --muted: #8a7fa0;
+  --sub: #c9bfdc;
   --gold: #f6c453;
   --accent: #c94f7c;
+  --r-N: #c9bfdc;
+  --r-R: #8fd3ff;
+  --r-SR: #c77dff;
+  --r-SSR: #ffd166;
+  --r-UR: #ff6b9d;
   font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
 }
 
@@ -40,6 +46,17 @@ body {
   cursor: crosshair;
 }
 
+.portrait {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  flex: none;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
 /* ---------- HUD ---------- */
 
 #hud {
@@ -49,14 +66,15 @@ body {
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 6px 14px;
+  gap: 16px;
+  padding: 6px 12px;
   background: var(--panel);
   color: var(--fg);
   border: 2px solid var(--panel-border);
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 #hud-money {
@@ -70,6 +88,30 @@ body {
 #hud-carry {
   color: #8fd3ff;
   font-variant-numeric: tabular-nums;
+}
+
+#hud-hosts {
+  color: #ff8fb3;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-btn {
+  padding: 4px 10px;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.hud-btn.gacha {
+  background: linear-gradient(135deg, #c77dff, #ff6b9d);
+}
+.hud-btn.zukan {
+  background: #3a3350;
+}
+.hud-btn:hover {
+  filter: brightness(1.12);
 }
 
 #hud-sale {
@@ -96,27 +138,9 @@ body {
   white-space: nowrap;
 }
 
-button {
-  font: inherit;
-  cursor: pointer;
-}
+/* ---------- パネル共通 ---------- */
 
-#shop-toggle {
-  padding: 4px 12px;
-  background: var(--accent);
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 700;
-}
-#shop-toggle:hover {
-  filter: brightness(1.1);
-}
-
-/* ---------- ショップ ---------- */
-
-.shop {
+.panel {
   position: absolute;
   right: 24px;
   top: 70px;
@@ -133,26 +157,32 @@ button {
   gap: 10px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
 }
-.shop.open {
+.panel.open {
   display: flex;
 }
+.panel.wide {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 48px));
+}
 
-.shop-head {
+.panel-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
 }
-.shop-head h2 {
+.panel-head h2 {
   margin: 0;
   font-size: 16px;
   color: var(--gold);
 }
-.shop-hint {
+.panel-hint {
   font-size: 11px;
   color: var(--muted);
   flex: 1;
 }
-.shop-close {
+.panel-close {
   background: transparent;
   color: var(--muted);
   border: 0;
@@ -160,22 +190,69 @@ button {
   line-height: 1;
   padding: 0 4px;
 }
-.shop-close:hover {
+.panel-close:hover {
   color: var(--fg);
 }
 
-.shop-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.shop-section {
+.panel-section {
   margin: 6px 0 -2px;
   font-size: 11px;
   font-weight: 700;
   color: var(--muted);
   letter-spacing: 0.08em;
+}
+
+.panel-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  padding-top: 6px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.btn-gold,
+.btn-pink {
+  min-width: 96px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.btn-gold {
+  background: var(--gold);
+  color: #2a1f3d;
+}
+.btn-pink {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-big {
+  padding: 10px 18px;
+  font-size: 14px;
+  min-width: 180px;
+}
+.btn-gold:hover:not(:disabled),
+.btn-pink:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.btn-gold:disabled,
+.btn-pink:disabled {
+  background: #3a3350;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* ---------- ショップ ---------- */
+
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .shop-row {
@@ -202,39 +279,16 @@ button {
 }
 .shop-effect {
   font-size: 11px;
-  color: #c9bfdc;
+  color: var(--sub);
   margin-top: 2px;
 }
-
-.shop-buy {
-  min-width: 96px;
-  padding: 6px 10px;
-  background: var(--gold);
-  color: #2a1f3d;
-  border: 0;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.shop-buy:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-.shop-buy:disabled {
-  background: #3a3350;
-  color: var(--muted);
-  cursor: not-allowed;
-}
-
-.shop-foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
+.shop-note {
   font-size: 11px;
-  color: var(--muted);
-  padding-top: 6px;
-  border-top: 1px solid var(--panel-border);
+  color: var(--sub);
+  line-height: 1.6;
+  padding: 8px 10px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 6px;
 }
 .shop-reset {
   background: transparent;
@@ -247,4 +301,259 @@ button {
 .shop-reset:hover {
   color: #ff6b6b;
   border-color: #ff6b6b;
+}
+
+/* ---------- ガチャ ---------- */
+
+.gacha-info {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  font-size: 13px;
+}
+.gacha-pity {
+  color: #ff8fb3;
+  flex: 1;
+}
+.gacha-money {
+  color: var(--gold);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.gacha-rates {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.rate-chip,
+.bonus-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-variant-numeric: tabular-nums;
+}
+[data-rarity="N"] {
+  --rc: var(--r-N);
+}
+[data-rarity="R"] {
+  --rc: var(--r-R);
+}
+[data-rarity="SR"] {
+  --rc: var(--r-SR);
+}
+[data-rarity="SSR"] {
+  --rc: var(--r-SSR);
+}
+[data-rarity="UR"] {
+  --rc: var(--r-UR);
+}
+.rate-chip,
+.bonus-chip {
+  color: var(--rc, var(--sub));
+}
+.bonus-chip.done {
+  background: color-mix(in srgb, var(--rc) 22%, transparent);
+}
+
+.gacha-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.gacha-results {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  min-height: 140px;
+}
+.gacha-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  align-self: center;
+}
+.gacha-god {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--r-UR);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 6px;
+  border: 1px solid var(--r-UR);
+  border-radius: 6px;
+  background: rgba(255, 107, 157, 0.1);
+}
+
+.gcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px 6px;
+  border-radius: 6px;
+  border: 2px solid var(--rc);
+  background: color-mix(in srgb, var(--rc) 10%, #120c1e);
+  animation: gcard-in 0.35s ease-out both;
+}
+.gcard[data-rarity="SSR"],
+.gcard[data-rarity="UR"] {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--rc) 60%, transparent);
+}
+.gcard-rarity {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--rc);
+  letter-spacing: 0.05em;
+}
+.gcard-name {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.2;
+}
+.gcard-race {
+  font-size: 10px;
+  color: var(--muted);
+}
+.gcard-tag {
+  font-size: 10px;
+  color: var(--sub);
+}
+.gcard-tag.new {
+  color: #7bd88f;
+  font-weight: 800;
+}
+.gcard-pity {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  font-size: 9px;
+  color: #ff8fb3;
+}
+
+@keyframes gcard-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.panel.flash-SSR {
+  animation: flash-ssr 0.9s ease-out;
+}
+.panel.flash-UR {
+  animation: flash-ur 1.4s ease-out;
+}
+@keyframes flash-ssr {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 209, 102, 0.9);
+  }
+  100% {
+    box-shadow: 0 0 0 30px rgba(255, 209, 102, 0);
+  }
+}
+@keyframes flash-ur {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 107, 157, 1);
+  }
+  50% {
+    box-shadow: 0 0 40px 20px rgba(255, 209, 102, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 0 40px rgba(255, 107, 157, 0);
+  }
+}
+
+/* ---------- 図鑑 ---------- */
+
+.zukan-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.zukan-count {
+  font-size: 13px;
+  font-weight: 700;
+}
+.zukan-bonuses {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.zukan-total {
+  font-size: 11px;
+  color: var(--gold);
+}
+.zukan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.zukan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+.zcard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--rc) 60%, transparent);
+  background: rgba(255, 255, 255, 0.03);
+}
+.zcard.locked {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.zcard-top {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.zcard-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--rc);
+}
+.zcard-meta {
+  font-size: 10px;
+  color: var(--muted);
+}
+.zcard-stars {
+  font-size: 10px;
+  color: var(--gold);
+  letter-spacing: 1px;
+}
+.zcard-stats {
+  font-size: 10px;
+  color: var(--sub);
+  font-variant-numeric: tabular-nums;
+}
+.zcard-passive {
+  font-size: 10px;
+  color: #ff8fb3;
+}
+.zcard-profile {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.zcard-status {
+  font-size: 10px;
+  color: var(--muted);
+}
+.zcard-status.on {
+  color: #7bd88f;
+  font-weight: 700;
 }

@@ -1,4 +1,10 @@
-import { SAVE, UPGRADES, type UpgradeKey, upgradeCost } from "./data/balance";
+import { GACHA, RARITIES, type Rarity, rarityRank, SAVE, UPGRADES, type UpgradeKey, upgradeCost } from "./data/balance";
+import { HOST_ROSTER, type HostDef } from "./data/hosts";
+
+export interface OwnedHost {
+  /** 限界突破段階（0〜GACHA.limitBreakMax） */
+  lb: number;
+}
 
 /** セーブに含める永続データ。エンティティの瞬間的な位置などは含めない。 */
 export interface SaveData {
@@ -6,8 +12,16 @@ export interface SaveData {
   money: number;
   totalRevenue: number;
   upgrades: Record<UpgradeKey, number>;
+  shopLevel: number;
+  hosts: Record<string, OwnedHost>;
+  /** 天井カウンター（天井対象レア度以上が出てからの連数） */
+  pity: number;
+  totalPulls: number;
   savedAt: number;
 }
+
+/** v2 セーブの「スカウト人数」を v3 の所持ホストに移行するときの順序 */
+const LEGACY_V2_SCOUT_ORDER = ["ren", "kakeru", "yuu", "garon", "rio", "rui"];
 
 export class GameState {
   money = 0;
@@ -20,8 +34,15 @@ export class GameState {
     carry: 0,
     staff: 0,
     staffLv: 0,
-    host: 0,
   };
+  /** 現在の店舗（1〜5）。店舗解放はフェーズ3 */
+  shopLevel = 1;
+  /** 所持ホスト（id → 限界突破段階） */
+  hosts: Record<string, OwnedHost> = {};
+  pity = 0;
+  totalPulls = 0;
+
+  // ---------- 店舗 ----------
 
   get tableCount(): number {
     return 1 + this.upgrades.table;
@@ -34,9 +55,6 @@ export class GameState {
   }
   get staffLevel(): number {
     return this.upgrades.staffLv;
-  }
-  get hostCount(): number {
-    return this.upgrades.host;
   }
 
   costOf(key: UpgradeKey): number {
@@ -61,39 +79,116 @@ export class GameState {
     this.totalRevenue += amount;
   }
 
+  // ---------- ホスト ----------
+
+  owns(id: string): boolean {
+    return this.hosts[id] !== undefined;
+  }
+  limitBreak(id: string): number {
+    return this.hosts[id]?.lb ?? 0;
+  }
+  ownedDefs(): HostDef[] {
+    return HOST_ROSTER.filter((d) => this.owns(d.id));
+  }
+
+  /**
+   * 出勤するホスト。所持ホストのうち「レア度 → 限界突破 → 名簿順」で上位から、
+   * テーブル数ぶんだけ。残りは控え。
+   */
+  onFloorDefs(): HostDef[] {
+    return HOST_ROSTER.map((d, i) => ({ d, i }))
+      .filter(({ d }) => this.owns(d.id))
+      .sort(
+        (a, b) =>
+          rarityRank(b.d.rarity) - rarityRank(a.d.rarity) || this.limitBreak(b.d.id) - this.limitBreak(a.d.id) || a.i - b.i,
+      )
+      .slice(0, this.tableCount)
+      .map(({ d }) => d);
+  }
+
+  /** そのレア度のホストを全員所持しているか */
+  isCollected(r: Rarity): boolean {
+    const all = HOST_ROSTER.filter((d) => d.rarity === r);
+    return all.length > 0 && all.every((d) => this.owns(d.id));
+  }
+  /** 図鑑コンプによる全売上ボーナス（加算） */
+  collectionBonus(): number {
+    let bonus = 0;
+    for (const r of RARITIES) if (this.isCollected(r)) bonus += GACHA.collectionBonus[r] ?? 0;
+    return bonus;
+  }
+  godOnFloor(): boolean {
+    return this.onFloorDefs().some((d) => d.race === "神");
+  }
+  /** 全売上にかかる倍率（図鑑コンプ＋神の出勤） */
+  globalRevenueMultiplier(): number {
+    return 1 + this.collectionBonus() + (this.godOnFloor() ? GACHA.godRevenueBonus : 0);
+  }
+  /** 来店間隔にかかる係数 */
+  spawnFactor(): number {
+    return this.godOnFloor() ? GACHA.godSpawnFactor : 1;
+  }
+
+  // ---------- セーブ ----------
+
   toSave(): SaveData {
     return {
       v: SAVE.version,
       money: this.money,
       totalRevenue: this.totalRevenue,
       upgrades: { ...this.upgrades },
+      shopLevel: this.shopLevel,
+      hosts: structuredClone(this.hosts),
+      pity: this.pity,
+      totalPulls: this.totalPulls,
       savedAt: Date.now(),
     };
   }
 
-  static fromSave(data: SaveData): GameState {
+  static fromSave(data: Partial<SaveData> & { v: number }): GameState {
     const s = new GameState();
-    s.money = Number(data.money) || 0;
-    s.totalRevenue = Number(data.totalRevenue) || 0;
+    s.money = num(data.money);
+    s.totalRevenue = num(data.totalRevenue);
     for (const key of Object.keys(s.upgrades) as UpgradeKey[]) {
-      const n = Number(data.upgrades?.[key]) || 0;
-      s.upgrades[key] = Math.max(0, Math.min(UPGRADES[key].max, Math.floor(n)));
+      s.upgrades[key] = clampInt(num(data.upgrades?.[key]), 0, UPGRADES[key].max);
+    }
+    s.shopLevel = clampInt(num(data.shopLevel) || 1, 1, 5);
+    s.pity = clampInt(num(data.pity), 0, GACHA.pity);
+    s.totalPulls = clampInt(num(data.totalPulls), 0, Number.MAX_SAFE_INTEGER);
+
+    if (data.v >= 3 && data.hosts && typeof data.hosts === "object") {
+      for (const def of HOST_ROSTER) {
+        const h = data.hosts[def.id];
+        if (h) s.hosts[def.id] = { lb: clampInt(num(h.lb), 0, GACHA.limitBreakMax) };
+      }
+    } else if (data.v === 2) {
+      // v2: ショップでスカウトした人数ぶん、名簿の先頭から所持扱いにする
+      const scouted = clampInt(num((data.upgrades as Record<string, number> | undefined)?.host), 0, LEGACY_V2_SCOUT_ORDER.length);
+      for (const id of LEGACY_V2_SCOUT_ORDER.slice(0, scouted)) s.hosts[id] = { lb: 0 };
     }
     return s;
   }
 }
 
-// --- 永続化（フェーズ1は localStorage。Tauri fs への切替はフェーズ4） ---
+function num(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+function clampInt(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
 
-export function loadSave(): SaveData | null {
+// --- 永続化（localStorage。Tauri fs への切替はフェーズ4） ---
+
+export function loadSave(): (Partial<SaveData> & { v: number }) | null {
   try {
     const raw = localStorage.getItem(SAVE.key);
     if (!raw) return null;
     const data = JSON.parse(raw) as Partial<SaveData>;
-    if (typeof data !== "object" || data === null) return null;
-    // 旧バージョンのセーブは互換性がないため破棄（開発初期のみ）
-    if (data.v !== SAVE.version) return null;
-    return data as SaveData;
+    if (typeof data !== "object" || data === null || typeof data.v !== "number") return null;
+    // v2 以降は移行可能。v1 は互換性なし
+    if (data.v < 2 || data.v > SAVE.version) return null;
+    return data as Partial<SaveData> & { v: number };
   } catch {
     return null;
   }

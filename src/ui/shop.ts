@@ -1,10 +1,10 @@
-import { HOST_RARITY, UPGRADES, type UpgradeKey } from "../game/data/balance";
-import { HOST_ROSTER } from "../game/data/hosts";
+import { UPGRADES, type UpgradeKey } from "../game/data/balance";
 import { maxGradeForCellar } from "../game/data/products";
 import { staffCarryFor, staffSpeedFor } from "../game/entities/staff";
 import { Player } from "../game/player";
 import type { GameState } from "../game/state";
 import { formatG } from "../game/util";
+import { BasePanel, buildPanelHead } from "./panel";
 
 interface Row {
   key: UpgradeKey;
@@ -16,6 +16,8 @@ interface Row {
 interface Section {
   title: string;
   rows: Row[];
+  /** 行の代わりに表示する説明文 */
+  note?: (s: GameState) => string;
 }
 
 const SECTIONS: Section[] = [
@@ -25,7 +27,7 @@ const SECTIONS: Section[] = [
       {
         key: "table",
         label: "テーブル増設",
-        effect: (s) => `${s.tableCount} 卓 → ${s.tableCount + 1} 卓`,
+        effect: (s) => `${s.tableCount} 卓 → ${s.tableCount + 1} 卓（ホストの出勤枠も+1）`,
       },
       {
         key: "cellar",
@@ -74,27 +76,17 @@ const SECTIONS: Section[] = [
   },
   {
     title: "ホスト — 卓に着いて接客",
-    rows: [
-      {
-        key: "host",
-        label: "ホストをスカウト",
-        effect: (s) => {
-          const next = HOST_ROSTER[s.hostCount];
-          if (!next) return "スカウトできるホストがいません";
-          const st = HOST_RARITY[next.rarity];
-          return `${next.name}（${next.rarity}・${next.race}）売上×${st.revenueMultiplier}、おかわり+${st.extraOrders}杯`;
-        },
-      },
-    ],
+    rows: [],
+    note: (s) =>
+      `ホストはガチャ（G キー）で獲得します。出勤できるのはテーブル数（${s.tableCount}人）まで、レア度の高い順。所持 ${s.ownedDefs().length} 人。`,
   },
 ];
 
 /** ショップパネル（HTML オーバーレイ） */
-export class ShopUI {
-  private readonly root: HTMLElement;
+export class ShopUI extends BasePanel {
   private readonly rowEls = new Map<UpgradeKey, { cost: HTMLElement; effect: HTMLElement; level: HTMLElement; btn: HTMLButtonElement }>();
+  private readonly noteEls: Array<{ el: HTMLElement; text: (s: GameState) => string }> = [];
   private readonly totalEl: HTMLElement;
-  private open = false;
   private lastSig = "";
 
   constructor(
@@ -102,46 +94,41 @@ export class ShopUI {
     private readonly onPurchase: () => void,
     private readonly onReset: () => void,
   ) {
-    const root = document.getElementById("shop");
-    if (!root) throw new Error("#shop が見つかりません");
-    this.root = root;
+    super("shop");
+    const root = this.root;
     root.innerHTML = "";
-
-    const head = document.createElement("div");
-    head.className = "shop-head";
-    head.innerHTML = `<h2>ショップ</h2><span class="shop-hint">B キーで開閉 / Esc で閉じる</span>`;
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "shop-close";
-    closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", () => this.close());
-    head.appendChild(closeBtn);
-    root.appendChild(head);
+    root.appendChild(buildPanelHead("ショップ", "B キーで開閉 / Esc で閉じる", () => this.close()));
 
     const list = document.createElement("div");
     list.className = "shop-list";
     for (const section of SECTIONS) {
       const h3 = document.createElement("h3");
-      h3.className = "shop-section";
+      h3.className = "panel-section";
       h3.textContent = section.title;
       list.appendChild(h3);
       for (const row of section.rows) list.appendChild(this.buildRow(row));
+      if (section.note) {
+        const note = document.createElement("div");
+        note.className = "shop-note";
+        list.appendChild(note);
+        this.noteEls.push({ el: note, text: section.note });
+      }
     }
     root.appendChild(list);
 
     const foot = document.createElement("div");
-    foot.className = "shop-foot";
+    foot.className = "panel-foot";
     this.totalEl = document.createElement("span");
     foot.appendChild(this.totalEl);
     const reset = document.createElement("button");
     reset.className = "shop-reset";
+    reset.type = "button";
     reset.textContent = "最初からやり直す";
     reset.addEventListener("click", () => {
       if (confirm("セーブデータを消して最初からやり直しますか？")) this.onReset();
     });
     foot.appendChild(reset);
     root.appendChild(foot);
-
-    document.getElementById("shop-toggle")?.addEventListener("click", () => this.toggle());
 
     this.refresh(true);
   }
@@ -161,7 +148,8 @@ export class ShopUI {
     effect.className = "shop-effect";
     info.append(title, effect);
     const btn = document.createElement("button");
-    btn.className = "shop-buy";
+    btn.className = "btn-gold";
+    btn.type = "button";
     const cost = document.createElement("span");
     btn.appendChild(cost);
     btn.addEventListener("click", () => {
@@ -175,26 +163,9 @@ export class ShopUI {
     return el;
   }
 
-  get isOpen(): boolean {
-    return this.open;
-  }
-  toggle(): void {
-    this.open ? this.close() : this.openPanel();
-  }
-  openPanel(): void {
-    this.open = true;
-    this.root.classList.add("open");
-    this.refresh(true);
-  }
-  close(): void {
-    this.open = false;
-    this.root.classList.remove("open");
-  }
-
-  /** 表示を最新にする。変化がなければ DOM を触らない。 */
   refresh(force = false): void {
     const s = this.state;
-    const sig = `${Math.floor(s.money)}|${Object.values(s.upgrades).join(",")}`;
+    const sig = `${Math.floor(s.money)}|${Object.values(s.upgrades).join(",")}|${s.ownedDefs().length}`;
     if (!force && sig === this.lastSig) return;
     this.lastSig = sig;
 
@@ -209,6 +180,7 @@ export class ShopUI {
         els.btn.disabled = !s.canBuy(row.key);
       }
     }
+    for (const n of this.noteEls) n.el.textContent = n.text(s);
     this.totalEl.textContent = `所持金 ${formatG(s.money)} ／ 累計売上 ${formatG(s.totalRevenue)}`;
   }
 }

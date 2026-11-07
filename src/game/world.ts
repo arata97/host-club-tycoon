@@ -1,37 +1,23 @@
 import { LOGICAL_H, LOGICAL_W } from "../engine/canvas";
 import type { Vec2 } from "../engine/input";
+import { FloatingTexts } from "../render/fx";
+import { UI_TEXT } from "../render/palette";
 import { CELLAR, CUSTOMER, PLAYER } from "./data/balance";
-import { HOST_ROSTER } from "./data/hosts";
 import { maxGradeForCellar, rollOrder } from "./data/products";
 import { Cellar } from "./entities/cellar";
 import { Customer } from "./entities/customer";
 import { Host } from "./entities/host";
 import { Staff, staffCarryFor, staffSpeedFor, type StaffWorld } from "./entities/staff";
 import { Table } from "./entities/table";
+import { CELLAR_POS, ENTRANCE, HOST_STANDBY, TABLE_SLOTS, WALL_BOTTOM } from "./layout";
 import { Player } from "./player";
 import type { GameState } from "./state";
-import { distance, FloatingTexts, formatG } from "./util";
+import { distance, formatG } from "./util";
 
-/** 店内レイアウト（論理座標） */
-const WALL_BOTTOM = 40;
-const ENTRANCE = { x: 22, y: 282 };
-const CELLAR_POS = { x: 430, y: 70 };
-/** ホストの待機席（右端に縦に並ぶ） */
-const HOST_STANDBY = { x: 455, y: 140, gap: 22 };
-const TABLE_SLOTS: ReadonlyArray<{ x: number; y: number }> = [
-  { x: 80, y: 135 },
-  { x: 175, y: 135 },
-  { x: 270, y: 135 },
-  { x: 365, y: 135 },
-  { x: 80, y: 230 },
-  { x: 175, y: 230 },
-  { x: 270, y: 230 },
-  { x: 365, y: 230 },
-];
 const STAFF_NAMES = ["黒服A", "黒服B", "黒服C", "黒服D", "黒服E", "黒服F"];
 
 /**
- * 店舗1フロアのシミュレーション。エンティティの生成・相互作用・描画を担当する。
+ * 店舗1フロアのシミュレーション。エンティティの生成・相互作用を担当する（描画は src/render/）。
  * 永続データは GameState が持ち、World は毎フレームそれを参照・更新する。
  */
 export class World implements StaffWorld {
@@ -39,14 +25,15 @@ export class World implements StaffWorld {
   readonly cellar = new Cellar(CELLAR_POS.x, CELLAR_POS.y);
   readonly tables: Table[] = [];
   readonly staff: Staff[] = [];
-  readonly hosts: Host[] = [];
-  private customers: Customer[] = [];
-  private readonly floats = new FloatingTexts();
+  /** 出勤中のホスト（待機席の並び順） */
+  hosts: Host[] = [];
+  customers: Customer[] = [];
+  readonly floats = new FloatingTexts();
+  /** 直近に提供した売上（HUD演出用） */
+  lastSale: { text: string; t: number } | null = null;
   private spawnT = 3;
   private pickupT = 0;
   private serveT = 0;
-  /** 直近に提供した売上（HUD演出用） */
-  lastSale: { text: string; t: number } | null = null;
 
   constructor(private readonly state: GameState) {
     this.syncWithState();
@@ -59,27 +46,46 @@ export class World implements StaffWorld {
     return staffCarryFor(this.state.staffLevel);
   }
 
-  /** テーブル数・内勤数・ホスト数を GameState に合わせる（購入後に呼ぶ） */
+  /** テーブル数・内勤数・出勤ホストを GameState に合わせる（購入・ガチャ後に呼ぶ） */
   syncWithState(): void {
-    while (this.tables.length < this.state.tableCount) {
+    const s = this.state;
+    while (this.tables.length < s.tableCount) {
       const slot = TABLE_SLOTS[this.tables.length];
       if (!slot) break;
       this.tables.push(new Table(slot.x, slot.y));
     }
-    while (this.staff.length < this.state.staffCount) {
+    while (this.staff.length < s.staffCount) {
       const name = STAFF_NAMES[this.staff.length] ?? "黒服";
       this.staff.push(new Staff(this.cellar.interactX - 24 + this.staff.length * 8, this.cellar.interactY + 12, name));
     }
-    while (this.hosts.length < this.state.hostCount) {
-      const def = HOST_ROSTER[this.hosts.length];
-      if (!def) break;
-      const sy = HOST_STANDBY.y + this.hosts.length * HOST_STANDBY.gap;
-      this.hosts.push(new Host(HOST_STANDBY.x, sy, def, HOST_STANDBY.x, sy));
-    }
+    this.syncHosts();
+  }
+
+  /** 出勤メンバーを入れ替える。外れたホストは卓を離れて消え、新しいホストは待機席に現れる */
+  private syncHosts(): void {
+    const desired = this.state.onFloorDefs();
+    const desiredIds = new Set(desired.map((d) => d.id));
+    for (const h of this.hosts) if (!desiredIds.has(h.def.id)) h.release();
+    const kept = this.hosts.filter((h) => desiredIds.has(h.def.id));
+
+    const next: Host[] = [];
+    desired.forEach((def, i) => {
+      const sx = HOST_STANDBY.x;
+      const sy = HOST_STANDBY.y + i * HOST_STANDBY.gap;
+      let h = kept.find((k) => k.def.id === def.id);
+      if (!h) {
+        h = new Host(sx, sy, def, this.state.limitBreak(def.id), sx, sy);
+        this.floats.add(sx - 10, sy - 20, "出勤!", UI_TEXT.pink);
+      }
+      h.limitBreak = this.state.limitBreak(def.id);
+      h.setStandby(sx, sy);
+      next.push(h);
+    });
+    this.hosts = next;
   }
 
   onServed(table: Table): void {
-    this.floats.add(table.x, table.y - 24, "提供!", "#8fd3ff");
+    this.floats.add(table.x, table.y - 24, "提供!", UI_TEXT.info);
   }
 
   update(dt: number, axis: Vec2): void {
@@ -132,16 +138,18 @@ export class World implements StaffWorld {
     }
 
     // 客の更新
+    const globalMult = s.globalRevenueMultiplier();
     for (const c of this.customers) {
+      const hostName = c.host?.name ?? (c.hostedByPlayer ? "店長" : null);
       const ev = c.update(dt);
       if (ev === "paid") {
-        const amount = c.lastPaid;
+        const amount = Math.round(c.lastPaid * globalMult);
         s.earn(amount);
-        this.floats.add(c.table.x, c.table.y - 30, `+${formatG(amount)}`, c.vip ? "#ffd166" : "#f6c453");
-        const who = c.host ? `[${c.host.name}] ` : c.hostedByPlayer ? "[店長] " : "";
-        this.lastSale = { text: `${who}${c.vip ? "VIP " : ""}${c.order.name} ${formatG(amount)}`, t: 3 };
+        this.floats.add(c.table.x, c.table.y - 30, `+${formatG(amount)}`, c.vip ? UI_TEXT.vipGold : UI_TEXT.gold);
+        const who = hostName ? `[${hostName}] ` : "";
+        this.lastSale = { text: `${who}${c.vip ? "VIP " : ""}${c.lastOrder.name} ${formatG(amount)}`, t: 3 };
       } else if (ev === "gaveUp") {
-        this.floats.add(c.table.x, c.table.y - 30, "帰った…", "#ff6b6b");
+        this.floats.add(c.table.x, c.table.y - 30, "帰った…", UI_TEXT.danger);
       }
     }
     this.customers = this.customers.filter((c) => c.phase !== "gone");
@@ -155,7 +163,8 @@ export class World implements StaffWorld {
 
   private spawnInterval(): number {
     const n = this.state.tableCount;
-    return Math.max(CUSTOMER.spawnIntervalMin, CUSTOMER.spawnIntervalBase - 0.5 * (n - 1));
+    const base = Math.max(CUSTOMER.spawnIntervalMin, CUSTOMER.spawnIntervalBase - 0.5 * (n - 1));
+    return base * this.state.spawnFactor();
   }
 
   private trySpawnCustomer(): void {
@@ -168,62 +177,6 @@ export class World implements StaffWorld {
     const c = new Customer(ENTRANCE.x, ENTRANCE.y, table, order, vip, maxGrade, ENTRANCE.x, ENTRANCE.y);
     table.customer = c;
     this.customers.push(c);
-    if (vip) this.floats.add(ENTRANCE.x + 20, ENTRANCE.y - 30, "VIP来店!", "#ffd166");
-  }
-
-  render(ctx: CanvasRenderingContext2D): void {
-    this.drawRoom(ctx);
-    this.cellar.draw(ctx, this.state.cellarLevel);
-    for (const t of this.tables) t.draw(ctx);
-
-    // 人物は y 順に描いて前後関係を出す
-    const people: Array<{ y: number; draw: () => void }> = [
-      { y: this.player.y, draw: () => this.player.draw(ctx) },
-      ...this.staff.map((st) => ({ y: st.y, draw: () => st.draw(ctx) })),
-      ...this.hosts.map((h) => ({ y: h.y, draw: () => h.draw(ctx) })),
-      ...this.customers.map((c) => ({ y: c.y, draw: () => c.draw(ctx) })),
-    ];
-    people.sort((a, b) => a.y - b.y);
-    for (const p of people) p.draw();
-
-    this.floats.draw(ctx);
-  }
-
-  private drawRoom(ctx: CanvasRenderingContext2D): void {
-    ctx.fillStyle = "#2a1f3d";
-    ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
-    const tile = 20;
-    for (let y = WALL_BOTTOM; y < LOGICAL_H; y += tile) {
-      for (let x = 0; x < LOGICAL_W; x += tile) {
-        const odd = ((x / tile + y / tile) & 1) === 1;
-        ctx.fillStyle = odd ? "#5a1f33" : "#4d1a2b";
-        ctx.fillRect(x, y, tile, tile);
-      }
-    }
-    ctx.fillStyle = "#3d2b55";
-    ctx.fillRect(0, WALL_BOTTOM - 6, LOGICAL_W, 6);
-    for (let x = 30; x < LOGICAL_W - 80; x += 60) {
-      ctx.fillStyle = "rgba(246,196,83,0.15)";
-      ctx.fillRect(x - 8, 20, 20, 14);
-      ctx.fillStyle = "#f6c453";
-      ctx.fillRect(x, 14, 4, 6);
-    }
-    // 入口（左下）
-    ctx.fillStyle = "#1a1320";
-    ctx.fillRect(0, ENTRANCE.y - 30, 14, 40);
-    ctx.fillStyle = "#f6c453";
-    ctx.fillRect(2, ENTRANCE.y - 28, 10, 2);
-    ctx.font = "6px monospace";
-    ctx.fillStyle = "#8a7fa0";
-    ctx.fillText("入口", 16, ENTRANCE.y - 22);
-    // ホスト待機席（右端のベンチ）
-    if (this.hosts.length > 0) {
-      const top = HOST_STANDBY.y - 14;
-      const h = this.hosts.length * HOST_STANDBY.gap + 4;
-      ctx.fillStyle = "#3a2a4f";
-      ctx.fillRect(HOST_STANDBY.x - 12, top, 24, h);
-      ctx.fillStyle = "#8a7fa0";
-      ctx.fillText("待機", HOST_STANDBY.x - 6, top - 3);
-    }
+    if (vip) this.floats.add(ENTRANCE.x + 20, ENTRANCE.y - 30, "VIP来店!", UI_TEXT.vipGold);
   }
 }
