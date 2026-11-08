@@ -1,3 +1,4 @@
+import { type SeatDef, seatAccepts, type SeatGrade, SEATS } from "../data/shops";
 import type { Customer } from "./customer";
 import type { Host } from "./host";
 import type { Staff } from "./staff";
@@ -21,7 +22,19 @@ export class Table {
     public readonly index: number,
     public x: number,
     public y: number,
+    public readonly grade: SeatGrade = "general",
   ) {}
+
+  get seat(): SeatDef {
+    return SEATS[this.grade];
+  }
+  get isPremium(): boolean {
+    return this.grade !== "general";
+  }
+  /** このホストはこの席に着けるか */
+  accepts(host: Host): boolean {
+    return seatAccepts(this.grade, host.def.rarity);
+  }
 
   /** 客が座る位置（ソファ右側） */
   get seatX(): number {
@@ -54,6 +67,6 @@ export class Table {
   /** ホストが着く価値がある（客がいて、まだホストがいない） */
   get wantsHost(): boolean {
     const c = this.customer;
-    return c !== null && c.phase !== "leaving" && c.phase !== "gone" && this.host === null && !this.autoBlocked;
+    return c !== null && c.phase !== "leaving" && c.phase !== "gone" && c.phase !== "checkout" && this.host === null && !this.autoBlocked;
   }
 }

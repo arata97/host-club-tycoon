@@ -2,6 +2,7 @@ import { type Rarity, rarityRank } from "./data/balance";
 import { EXPENSES, HOST_WAGE, hostGuaranteeFor, LOAN, rentDiscount, rentFor, staffWageFor } from "./data/economy";
 import { hostById } from "./data/hosts";
 import type { Product } from "./data/products";
+import type { SeatGrade } from "./data/shops";
 import type { GameState } from "./state";
 
 /** 1営業日の売上の記録。営業中に World が書き込み、閉店時に精算する */
@@ -31,6 +32,10 @@ export class DayLedger {
   dohanFees = 0;
   /** 指名ホストの接客を受けて、怒らずに帰った太客（アフターの誘いの対象） */
   nominatedRegularIds: number[] = [];
+  /** 上位席の売上（sales にも含む） */
+  premiumSales = 0;
+  /** シャンパンコールの回数 */
+  champagneCalls = 0;
 
   /** 同伴料を売上に計上する。担当ホストの歩合の対象になる */
   recordDohanFee(fee: number, hostId: string): void {
@@ -40,8 +45,9 @@ export class DayLedger {
     this.salesByHost[hostId] = (this.salesByHost[hostId] ?? 0) + fee;
   }
 
-  recordSale(amount: number, product: Product, hostId: string | null, byPlayer: boolean): void {
+  recordSale(amount: number, product: Product, hostId: string | null, byPlayer: boolean, seat: SeatGrade = "general"): void {
     this.sales += amount;
+    if (seat !== "general") this.premiumSales += amount;
     this.cogs += Math.round(product.price * EXPENSES.cogsRate);
     this.bottles += 1;
     if (hostId) this.salesByHost[hostId] = (this.salesByHost[hostId] ?? 0) + amount;
@@ -86,6 +92,10 @@ export interface DayReport {
   budgetOuts: number;
   dohans: number;
   dohanFees: number;
+  premiumSales: number;
+  champagneCalls: number;
+  /** 月間No.1の発表（期間の最終日のみ） */
+  monthlyNo1: { name: string; sales: number } | null;
 }
 
 /**
@@ -107,6 +117,7 @@ export function settleDay(state: GameState, ledger: DayLedger, onFloorIds: reado
     .filter((p): p is HostPay => p !== null)
     .sort((a, b) => b.sales - a.sales || rarityRank(b.rarity) - rarityRank(a.rarity));
   const hostWages = hostPays.reduce((a, p) => a + p.paid, 0);
+  const monthlyNo1 = state.recordMonthly(hostPays);
 
   const rent = Math.round(rentFor(state.shopLevel) * (1 - rentDiscount(state.rebirths)));
   const interest = Math.round(state.debt * LOAN.dailyRate);
@@ -143,5 +154,8 @@ export function settleDay(state: GameState, ledger: DayLedger, onFloorIds: reado
     budgetOuts: ledger.budgetOuts,
     dohans: ledger.dohans,
     dohanFees: ledger.dohanFees,
+    premiumSales: ledger.premiumSales,
+    champagneCalls: ledger.champagneCalls,
+    monthlyNo1,
   };
 }

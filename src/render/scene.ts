@@ -1,14 +1,17 @@
+import { LOGICAL_W } from "../engine/canvas";
+import { CHAMPAGNE } from "../game/data/shops";
 import type { GameState } from "../game/state";
 import type { World } from "../game/world";
 import { drawCustomer, drawHost, drawPlayer, drawPrompt, drawStaff } from "./entities";
 import { drawCellar, drawRoom, drawTable } from "./furniture";
+import { UI_TEXT } from "./palette";
 
 /**
  * 1フレーム分のフロアを描く。ゲームの状態は読むだけで変更しない。
  * グラフィックを差し替えるときは src/render/ 配下だけを触ればよい。
  */
 export function drawScene(ctx: CanvasRenderingContext2D, world: World, state: GameState): void {
-  drawRoom(ctx, world.hosts.length);
+  drawRoom(ctx, world.hosts.length, state.shopLevel);
   drawCellar(ctx, world.cellar, state.cellarLevel);
   for (const t of world.tables) drawTable(ctx, t);
 
@@ -29,6 +32,21 @@ export function drawScene(ctx: CanvasRenderingContext2D, world: World, state: Ga
   }
 
   world.floats.draw(ctx);
+
+  if (world.champagneT > 0) drawChampagneBanner(ctx, world.champagneT);
+}
+
+function drawChampagneBanner(ctx: CanvasRenderingContext2D, remainMin: number): void {
+  const text = `シャンパンコール！ 全卓の売上×${CHAMPAGNE.multiplier}　残り ${Math.ceil(remainMin)} 分`;
+  ctx.font = "bold 8px monospace";
+  const w = Math.ceil(ctx.measureText(text).width) + 12;
+  const x = Math.round((LOGICAL_W - w) / 2);
+  ctx.fillStyle = "rgba(14,9,24,0.85)";
+  ctx.fillRect(x, 2, w, 12);
+  ctx.fillStyle = UI_TEXT.vipGold;
+  ctx.textAlign = "center";
+  ctx.fillText(text, LOGICAL_W / 2, 11);
+  ctx.textAlign = "left";
 }
 
 /** ドラッグ操作の仮想スティック */

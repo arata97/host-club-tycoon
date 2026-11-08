@@ -1,6 +1,7 @@
 import { ASSIGN_POLICIES, INVITE, STAMINA } from "../game/data/customers";
 import { hostGuaranteeFor, HOST_WAGE, LOAN, rentDiscount, rentFor } from "../game/data/economy";
 import { RACES } from "../game/data/races";
+import { MONTHLY, SHOPS } from "../game/data/shops";
 import { pendingCount } from "../game/invitations";
 import type { GameState } from "../game/state";
 import { formatG } from "../game/util";
@@ -9,7 +10,7 @@ import { BasePanel, buildPanelHead } from "./panel";
 import { createPortrait } from "./portrait";
 import { renderReport } from "./report";
 
-type Tab = "report" | "dohan" | "roster" | "finance";
+type Tab = "report" | "dohan" | "roster" | "finance" | "store";
 
 /**
  * 経営画面（開店前）。日報の確認、借入・返済、開店ボタン。
@@ -23,6 +24,8 @@ export class OfficeUI extends BasePanel {
   private readonly footNoteEl: HTMLElement;
   private tab: Tab = "report";
   private lastSig = "";
+  /** 移転ボタンを1回押して、確認待ちの状態 */
+  private confirmMove = false;
 
   constructor(
     private readonly state: GameState,
@@ -44,6 +47,7 @@ export class OfficeUI extends BasePanel {
       ["dohan", "同伴"],
       ["roster", "出勤・方針"],
       ["finance", "財務"],
+      ["store", "店舗"],
     ] as const) {
       const b = document.createElement("button");
       b.type = "button";
@@ -52,6 +56,7 @@ export class OfficeUI extends BasePanel {
       b.textContent = label;
       b.addEventListener("click", () => {
         this.tab = key;
+        this.confirmMove = false;
         this.refresh(true);
       });
       this.tabsEl.appendChild(b);
@@ -86,7 +91,7 @@ export class OfficeUI extends BasePanel {
   refresh(force = false): void {
     const s = this.state;
     const dohanSig = s.dohanOffers.map((o) => `${o.id}:${o.status}`).join(",");
-    const sig = `${this.tab}|${Math.floor(s.money)}|${s.debt}|${s.day}|${s.negativeDays}|${s.lastReport?.day ?? 0}|${s.policy}|${s.rosterMode}|${s.manualRoster.join(",")}|${Object.keys(s.hosts).length}|${s.tableCount}|${s.regulars.length}|${dohanSig}`;
+    const sig = `${this.tab}|${Math.floor(s.money)}|${s.debt}|${s.day}|${s.negativeDays}|${s.lastReport?.day ?? 0}|${s.policy}|${s.rosterMode}|${s.manualRoster.join(",")}|${Object.keys(s.hosts).length}|${s.tableCount}|${s.regulars.length}|${dohanSig}|${s.shopLevel}|${this.confirmMove}`;
     if (!force && sig === this.lastSig) return;
     this.lastSig = sig;
 
@@ -122,7 +127,102 @@ export class OfficeUI extends BasePanel {
     if (this.tab === "report") this.renderReportTab();
     else if (this.tab === "dohan") this.renderDohanTab();
     else if (this.tab === "roster") this.renderRosterTab();
-    else this.renderFinanceTab();
+    else if (this.tab === "finance") this.renderFinanceTab();
+    else this.renderStoreTab();
+  }
+
+  private renderStoreTab(): void {
+    const s = this.state;
+    const wrap = document.createElement("div");
+    wrap.className = "store-list";
+    const rentOf = (level: number) => Math.round(rentFor(level) * (1 - rentDiscount(s.rebirths)));
+
+    for (const def of SHOPS) {
+      const row = document.createElement("div");
+      const isCurrent = def.level === s.shopLevel;
+      const isNext = def.level === s.shopLevel + 1;
+      row.className = `store-row${isCurrent ? " current" : ""}${def.level > s.shopLevel + 1 ? " far" : ""}`;
+
+      const title = document.createElement("div");
+      title.className = "store-title";
+      title.textContent = `店舗${def.level} ${def.name}`;
+      const badge = document.createElement("span");
+      badge.className = "store-badge";
+      badge.textContent = isCurrent ? "現在の店舗" : def.level < s.shopLevel ? "移転済み" : isNext ? "次の移転先" : "未解放";
+      title.appendChild(badge);
+
+      const detail = document.createElement("div");
+      detail.className = "store-detail";
+      const seats = [`一般 ${def.seats.general}`];
+      if (def.seats.vip > 0) seats.push(`VIP ${def.seats.vip}`);
+      if (def.seats.exe > 0) seats.push(`EXE ${def.seats.exe}`);
+      if (def.seats.god > 0) seats.push(`神座 ${def.seats.god}`);
+      detail.textContent = `家賃 ${formatG(rentOf(def.level))}/日 ／ 席の上限 ${seats.join("・")}`;
+
+      const feature = document.createElement("div");
+      feature.className = "store-feature";
+      feature.textContent = def.feature;
+      row.append(title, detail, feature);
+
+      if (isNext) row.appendChild(this.buildMoveControls(def.level));
+      wrap.appendChild(row);
+    }
+
+    if (s.shopLevel >= MONTHLY.fromShop) {
+      const note = document.createElement("div");
+      note.className = "finance-note";
+      const no1 = s.ownedDefs().find((d) => d.id === s.no1HostId);
+      note.textContent = `月間No.1: ${no1 ? `${no1.name}（売上 +${Math.round(MONTHLY.bonus * 100)}%）` : "なし"} ／ 次の発表まで ${MONTHLY.days - s.monthDays} 営業日`;
+      wrap.appendChild(note);
+    }
+    this.bodyEl.appendChild(wrap);
+  }
+
+  private buildMoveControls(level: number): HTMLElement {
+    const s = this.state;
+    const def = SHOPS[level - 1];
+    const box = document.createElement("div");
+    box.className = "store-move";
+    if (!def) return box;
+
+    const cond = document.createElement("div");
+    cond.className = "finance-info";
+    const needs = def.needsFullCollection
+      ? `図鑑コンプ（所持 ${s.ownedDefs().length} / 20 人）`
+      : `累計売上 <b>${formatG(s.totalRevenue)}</b> / ${formatG(def.unlockRevenue)}`;
+    cond.innerHTML = `解放条件: ${needs}<br>移転費用: <b>${formatG(def.moveCost)}</b>（設備・内勤・ホスト・太客はそのまま）<br>
+      移転後: 家賃 ${formatG(Math.round(rentFor(level) * (1 - rentDiscount(s.rebirths))))}/日、ホストの最低保証は R で ${formatG(hostGuaranteeFor("R", level))} になります`;
+    box.appendChild(cond);
+
+    const block = s.relocationBlock();
+    const shortfall = Math.ceil(s.relocationShortfall());
+    const canBorrow = shortfall > 0 && shortfall <= s.borrowable();
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-pink";
+    if (block) {
+      btn.disabled = true;
+      btn.textContent = block;
+    } else if (shortfall > 0 && !canBorrow) {
+      btn.disabled = true;
+      btn.textContent = `資金が足りません（あと ${formatG(shortfall)}、借入枠 ${formatG(s.borrowable())}）`;
+    } else if (this.confirmMove) {
+      btn.textContent = "本当に移転する（元の店には戻れません）";
+    } else {
+      btn.textContent = shortfall > 0 ? `差額 ${formatG(shortfall)} を借りて移転する` : "移転する";
+    }
+    btn.addEventListener("click", () => {
+      if (!this.confirmMove) {
+        this.confirmMove = true;
+        this.refresh(true);
+        return;
+      }
+      this.confirmMove = false;
+      if (s.relocate(true)) this.onChange();
+      this.refresh(true);
+    });
+    box.appendChild(btn);
+    return box;
   }
 
   private renderDohanTab(): void {
@@ -226,9 +326,10 @@ export class OfficeUI extends BasePanel {
       const check = document.createElement("span");
       check.className = "roster-check";
       check.textContent = s.pinnedHostIds().has(d.id) ? "✔ 同伴" : on ? "✔ 出勤" : "控え";
+      const crown = d.id === s.no1HostId ? "👑 " : "";
       const info = document.createElement("span");
       info.className = "roster-info";
-      info.innerHTML = `<b>${d.name}</b> <small>${d.rarity}・${d.race}${s.limitBreak(d.id) ? ` +${s.limitBreak(d.id)}` : ""}</small><br>
+      info.innerHTML = `<b>${crown}${d.name}</b> <small>${d.rarity}・${d.race}${s.limitBreak(d.id) ? ` +${s.limitBreak(d.id)}` : ""}</small><br>
         <small>${RACES[d.race].description}</small><br>
         <small>歩合 ${Math.round(HOST_WAGE.rate[d.rarity] * 100)}% ／ 最低保証 ${formatG(guarantee)} ／ 太客 ${regs} 人</small>`;
       const st = document.createElement("span");

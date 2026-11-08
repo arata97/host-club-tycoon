@@ -14,19 +14,24 @@ import {
   timeBandOf,
 } from "./data/customers";
 import { DAY } from "./data/economy";
-import { maxGradeForCellar, PRODUCTS, rollOrder } from "./data/products";
+import { maxGradeFor, PRODUCTS, rollOrder } from "./data/products";
 import { RACES } from "./data/races";
+import { CHAMPAGNE, GOD_THRONE_BONUS, SEAT_GRADES, SEAT_WALKIN_CHANCE, type SeatGrade } from "./data/shops";
 import { Cellar } from "./entities/cellar";
 import { Customer } from "./entities/customer";
 import { Host } from "./entities/host";
 import { Staff, staffCarryFor, staffSpeedFor, type StaffWorld } from "./entities/staff";
 import { Table } from "./entities/table";
 import { dohanFee } from "./invitations";
-import { CELLAR_POS, ENTRANCE, HOST_STANDBY, TABLE_SLOTS, WALL_BOTTOM } from "./layout";
+import { CELLAR_POS, ENTRANCE, SEAT_SLOTS, standbyPos, WALL_BOTTOM } from "./layout";
 import { DayLedger } from "./ledger";
 import { Player } from "./player";
 import type { GameState, Regular } from "./state";
 import { distance, formatG } from "./util";
+
+function seatRank(grade: SeatGrade): number {
+  return SEAT_GRADES.indexOf(grade);
+}
 
 const STAFF_NAMES = ["黒服A", "黒服B", "黒服C", "黒服D", "黒服E", "黒服F"];
 
@@ -58,6 +63,9 @@ export class World implements StaffWorld {
   private pickupT = 0;
   private serveT = 0;
   private clockMin = 0;
+  /** シャンパンコールの残り時間と、次に出せるまでの時間（分） */
+  champagneT = 0;
+  private champagneCooldownT = 0;
 
   constructor(private readonly state: GameState) {
     this.syncWithState();
@@ -72,6 +80,9 @@ export class World implements StaffWorld {
   get floorClear(): boolean {
     return this.customers.length === 0;
   }
+  private get maxGrade() {
+    return maxGradeFor(this.state.cellarLevel, this.state.shopLevel);
+  }
 
   /** 開店 */
   startDay(): void {
@@ -81,30 +92,44 @@ export class World implements StaffWorld {
     this.clockMin = 0;
     this.cellar.stock = this.cellar.capacity(this.state.cellarLevel);
     this.lastSale = null;
+    this.champagneT = 0;
+    this.champagneCooldownT = 0;
     this.spawnDohans();
   }
 
-  /** 開店と同時に、同伴の客がホストと一緒に来店する */
+  /** 開店と同時に、同伴の客がホストと一緒に来店する。格の高いホストから、着ける中で最上位の席へ */
   private spawnDohans(): void {
     const s = this.state;
-    const maxGrade = maxGradeForCellar(s.cellarLevel);
-    const free = this.tables.filter((t) => t.isFree);
+    const maxGrade = this.maxGrade;
+    const free = this.tables.filter((t) => t.isFree).sort((a, b) => seatRank(b.grade) - seatRank(a.grade));
+    const rankOf = (hostId: string) => rarityRank(this.hosts.find((h) => h.def.id === hostId)?.def.rarity ?? "N");
+    const accepted = s.dohanOffers.filter((o) => o.status === "accepted").sort((a, b) => rankOf(b.hostId) - rankOf(a.hostId));
     let delay = 0;
-    for (const inv of s.dohanOffers) {
-      if (inv.status !== "accepted") continue;
+    for (const inv of accepted) {
       inv.status = "used";
       const regular = s.regulars.find((r) => r.id === inv.regularId);
       const host = this.hosts.find((h) => h.def.id === inv.hostId);
-      const table = free.shift();
+      const table = host ? free.find((t) => t.accepts(host)) : undefined;
       if (!regular || !host || !table) continue;
+      free.splice(free.indexOf(table), 1);
 
-      const order = rollOrder(maxGrade, false);
+      const seatMult = table.seat.priceMultiplier;
+      const order = rollOrder(maxGrade, false, 0, table.grade === "exe");
       const budget = Math.round(
-        Math.max(order.price, this.rollBudget(regular.type, false, regular, maxGrade)) * (1 + INVITE.dohanBudgetBonus),
+        Math.max(order.price * seatMult, this.rollBudget(regular.type, false, regular, maxGrade) * seatMult) * (1 + INVITE.dohanBudgetBonus),
       );
       regular.afterBoost = false;
       const x = ENTRANCE.x + delay;
-      const c = new Customer(x, ENTRANCE.y, table, order, { type: regular.type, vip: false, budget, regular, dohan: true }, maxGrade, ENTRANCE.x, ENTRANCE.y);
+      const c = new Customer(
+        x,
+        ENTRANCE.y,
+        table,
+        order,
+        { type: regular.type, vip: false, budget, regular, dohan: true, checkoutMin: s.checkoutMin },
+        maxGrade,
+        ENTRANCE.x,
+        ENTRANCE.y,
+      );
       table.customer = c;
       this.customers.push(c);
       host.x = x + 10;
@@ -130,10 +155,15 @@ export class World implements StaffWorld {
   /** テーブル数・内勤数・出勤ホストを GameState に合わせる（購入・ガチャ・出勤変更後に呼ぶ） */
   syncWithState(): void {
     const s = this.state;
-    while (this.tables.length < s.tableCount) {
-      const slot = TABLE_SLOTS[this.tables.length];
-      if (!slot) break;
-      this.tables.push(new Table(this.tables.length, slot.x, slot.y));
+    for (const grade of SEAT_GRADES) {
+      const slots = SEAT_SLOTS[grade];
+      let n = this.tables.filter((t) => t.grade === grade).length;
+      while (n < s.seatCount(grade)) {
+        const slot = slots[n];
+        if (!slot) break;
+        this.tables.push(new Table(this.tables.length, slot.x, slot.y, grade));
+        n += 1;
+      }
     }
     while (this.staff.length < s.staffCount) {
       const name = STAFF_NAMES[this.staff.length] ?? "黒服";
@@ -152,14 +182,14 @@ export class World implements StaffWorld {
     desired.forEach((def, i) => {
       const owned = this.state.hosts[def.id];
       if (!owned) return;
-      const sx = HOST_STANDBY.x;
-      const sy = HOST_STANDBY.y + i * HOST_STANDBY.gap;
+      const { x: sx, y: sy } = standbyPos(i);
       let h = kept.find((k) => k.def.id === def.id);
       if (!h) {
         h = new Host(sx, sy, def, owned, sx, sy);
         this.floats.add(sx - 10, sy - 20, "出勤!", UI_TEXT.pink);
       }
       h.owned = owned;
+      h.isNo1 = def.id === this.state.no1HostId;
       h.setStandby(sx, sy);
       next.push(h);
     });
@@ -168,6 +198,25 @@ export class World implements StaffWorld {
 
   onServed(table: Table): void {
     this.floats.add(table.x, table.y - 24, "提供!", UI_TEXT.info);
+    const c = table.customer;
+    if (c?.order.call) this.tryChampagneCall(c.host?.name ?? null);
+  }
+
+  /** シャンパンコール: 対象の酒が提供されると一定時間、全卓の売上が上がる */
+  private tryChampagneCall(hostName: string | null): void {
+    if (this.state.shopLevel < CHAMPAGNE.fromShop || this.champagneT > 0 || this.champagneCooldownT > 0) return;
+    this.champagneT = CHAMPAGNE.durationMin;
+    this.ledger.champagneCalls += 1;
+    this.floats.add(LOGICAL_W / 2 - 40, 60, `${hostName ? `${hostName} の` : ""}シャンパンコール!`, UI_TEXT.vipGold);
+  }
+
+  private updateChampagne(dt: number): void {
+    if (this.champagneT > 0) {
+      this.champagneT = Math.max(0, this.champagneT - dt);
+      if (this.champagneT === 0) this.champagneCooldownT = CHAMPAGNE.cooldownMin;
+    } else if (this.champagneCooldownT > 0) {
+      this.champagneCooldownT = Math.max(0, this.champagneCooldownT - dt);
+    }
   }
 
   // ---------- つけ回し ----------
@@ -182,8 +231,10 @@ export class World implements StaffWorld {
     for (const t of waiting) {
       const c = t.customer;
       if (!c) continue;
-      const free = this.hosts.filter((h) => h.available);
-      if (free.length === 0) return;
+      const allFree = this.hosts.filter((h) => h.available);
+      if (allFree.length === 0) return;
+      const free = allFree.filter((h) => t.accepts(h));
+      if (free.length === 0) continue;
 
       // 指名客: 指名ホストが空いていれば必ずその人
       const nomId = c.nominatedHostId;
@@ -198,9 +249,23 @@ export class World implements StaffWorld {
         if (policy === "nomination" && onFloor && c.ageMin < REGULAR.waitForNominatedMin) continue;
       }
       // 指名優先の一見客: 指名客のために高レアを温存しない（手の空いた順）
-      const pick = this.pickHost(free, c.type, policy);
+      const pick = this.pickHost(t.isPremium ? free : this.withoutReserved(free), c.type, policy);
       pick?.assign(t);
     }
+  }
+
+  /** 一般席のつけ回しでは、空いている上位席に着ける高レアを温存する（他に手の空いた者がいる間だけ） */
+  private withoutReserved(free: Host[]): Host[] {
+    const reserved = new Set<Host>();
+    const premium = this.tables.filter((t) => t.isPremium && t.isFree).sort((a, b) => seatRank(b.grade) - seatRank(a.grade));
+    for (const t of premium) {
+      const lowest = free
+        .filter((h) => t.accepts(h) && !reserved.has(h))
+        .sort((a, b) => rarityRank(a.def.rarity) - rarityRank(b.def.rarity))[0];
+      if (lowest) reserved.add(lowest);
+    }
+    const rest = free.filter((h) => !reserved.has(h));
+    return rest.length > 0 ? rest : free;
   }
 
   private pickHost(free: Host[], type: CustomerType, policy: string): Host | null {
@@ -236,11 +301,12 @@ export class World implements StaffWorld {
   reassign(table: Table, host: Host | null): boolean {
     if (!table.customer || table.customer.phase === "leaving") return false;
     if (host === null) {
+      if (table.isPremium) return false;
       table.host?.release();
       table.autoBlocked = true;
       return true;
     }
-    if (host.stamina < 1) return false;
+    if (host.stamina < 1 || !table.accepts(host)) return false;
     if (table.host === host) return true;
     table.host?.release();
     table.autoBlocked = false;
@@ -253,7 +319,7 @@ export class World implements StaffWorld {
     let best: Table | null = null;
     let bestD = PLAYER.interactRadius * 1.6;
     for (const t of this.tables) {
-      if (!t.customer || t.customer.phase === "leaving") continue;
+      if (!t.customer || t.customer.phase === "leaving" || t.customer.phase === "checkout") continue;
       const d = distance(this.player, { x: t.serveX, y: t.serveY });
       if (d < bestD) {
         bestD = d;
@@ -274,6 +340,7 @@ export class World implements StaffWorld {
 
     if (tick.open) {
       this.cellar.update(dt, s.cellarLevel);
+      this.updateChampagne(dt);
       this.updatePlayerActions(dt);
       for (const st of this.staff) st.update(dt, this);
       this.autoAssign();
@@ -319,6 +386,7 @@ export class World implements StaffWorld {
       const c = t.customer;
       const near = distance(this.player, { x: t.serveX, y: t.serveY }) < PLAYER.interactRadius;
       if (c && c.phase !== "walking") c.setPlayerHosting(near);
+      if (near && c?.completeCheckout()) this.floats.add(t.x, t.y - 24, "会計!", UI_TEXT.info);
       if (near && t.needsService && this.player.carrying > 0 && this.serveT >= PLAYER.serveInterval) {
         if (c?.serve()) {
           this.player.carrying -= 1;
@@ -332,7 +400,9 @@ export class World implements StaffWorld {
 
   private updateCustomers(dt: number): void {
     const s = this.state;
-    const globalMult = s.globalRevenueMultiplier();
+    const godSeated = this.tables.some((t) => t.grade === "god" && t.customer && t.host?.phase === "serving" && t.host.def.race === "神");
+    const champagne = this.champagneT > 0 ? CHAMPAGNE.multiplier : 1;
+    const globalMult = (s.globalRevenueMultiplier() + (godSeated ? GOD_THRONE_BONUS : 0)) * champagne;
     for (const c of this.customers) {
       const hostId = c.host?.def.id ?? null;
       const hostName = c.host?.name ?? (c.hostedByPlayer ? "店長" : null);
@@ -341,7 +411,7 @@ export class World implements StaffWorld {
       if (ev === "paid") {
         const amount = Math.round(c.lastPaid * globalMult);
         s.earn(amount);
-        this.ledger.recordSale(amount, c.lastOrder, hostId, byPlayer);
+        this.ledger.recordSale(amount, c.lastOrder, hostId, byPlayer, c.table.grade);
         this.floats.add(c.table.x, c.table.y - 30, `+${formatG(amount)}`, c.vip ? UI_TEXT.vipGold : UI_TEXT.gold);
         const who = hostName ? `[${hostName}] ` : "";
         this.lastSale = { text: `${who}${c.vip ? "VIP " : ""}${c.lastOrder.name} ${formatG(amount)}`, t: 3 };
@@ -401,7 +471,7 @@ export class World implements StaffWorld {
 
   /** 来店時の予算: 提供可能グレードの平均単価 × タイプの杯数 × 時間帯 × VIP × 好感度 */
   private rollBudget(type: CustomerType, vip: boolean, regular: Regular | null, maxGrade: number): number {
-    const avail = PRODUCTS.filter((p) => p.grade <= maxGrade);
+    const avail = PRODUCTS.filter((p) => p.grade <= maxGrade && !p.exeOnly);
     const avg = avail.reduce((a, p) => a + p.price, 0) / Math.max(1, avail.length);
     const [lo, hi] = CUSTOMER_TYPE_DEFS[type].budgetDrinks;
     const drinks = lo + Math.random() * (hi - lo);
@@ -442,22 +512,52 @@ export class World implements StaffWorld {
     return candidates[0] ?? null;
   }
 
-  private trySpawnCustomer(): void {
+  /**
+   * 来店客の席を選ぶ。上位席は、着けるホストの手が空いているときだけ案内する。
+   * VIP・指名客は上位席が優先。一見客は一般席が基本で、一般席が満席なら上位席へ。
+   */
+  private chooseSeat(vip: boolean, regular: Regular | null): Table | null {
     const free = this.tables.filter((t) => t.isFree);
-    const table = free[Math.floor(Math.random() * free.length)];
+    const general = free.filter((t) => !t.isPremium);
+    const available = this.hosts.filter((h) => h.available);
+    const premium = free
+      .filter((t) => t.isPremium && available.some((h) => t.accepts(h)))
+      .sort((a, b) => seatRank(b.grade) - seatRank(a.grade));
+    const nominated = regular ? available.find((h) => h.def.id === regular.hostId) : undefined;
+    const forNominated = nominated ? premium.find((t) => t.accepts(nominated)) : undefined;
+    if (forNominated) return forNominated;
+    if (premium[0] && (vip || general.length === 0 || Math.random() < SEAT_WALKIN_CHANCE)) {
+      return vip ? premium[0] : (premium[Math.floor(Math.random() * premium.length)] ?? null);
+    }
+    return general[Math.floor(Math.random() * general.length)] ?? null;
+  }
+
+  /** 上位席はホストが着く前提で案内するので、来店と同時に担当を決める */
+  private seatHostAtPremium(table: Table, c: Customer): void {
+    const free = this.hosts.filter((h) => h.available && table.accepts(h));
+    const host = free.find((h) => h.def.id === c.nominatedHostId) ?? this.pickHost(free, c.type, this.state.policy);
+    host?.assign(table);
+  }
+
+  private trySpawnCustomer(): void {
+    const s = this.state;
+    const vip = Math.random() < TIME_BANDS[timeBandOf(this.clockMin)].vipChance;
+    const regular = this.pickRegular();
+    const table = this.chooseSeat(vip, regular);
     if (!table) return;
     table.autoBlocked = false;
-    const regular = this.pickRegular();
     const type = regular?.type ?? this.pickType();
-    const vip = Math.random() < TIME_BANDS[timeBandOf(this.clockMin)].vipChance;
-    const maxGrade = maxGradeForCellar(this.state.cellarLevel);
-    const order = rollOrder(maxGrade, vip);
-    const budget = Math.max(order.price * (vip ? CUSTOMER.vipMultiplier : 1), this.rollBudget(type, vip, regular, maxGrade));
+    const maxGrade = this.maxGrade;
+    const order = rollOrder(maxGrade, vip, 0, table.grade === "exe");
+    const seatMult = table.seat.priceMultiplier;
+    const vipMult = vip ? CUSTOMER.vipMultiplier : 1;
+    const budget = Math.max(order.price * vipMult * seatMult, this.rollBudget(type, vip, regular, maxGrade) * seatMult);
     if (regular) regular.afterBoost = false;
-    const c = new Customer(ENTRANCE.x, ENTRANCE.y, table, order, { type, vip, budget, regular }, maxGrade, ENTRANCE.x, ENTRANCE.y);
+    const c = new Customer(ENTRANCE.x, ENTRANCE.y, table, order, { type, vip, budget, regular, checkoutMin: s.checkoutMin }, maxGrade, ENTRANCE.x, ENTRANCE.y);
     table.customer = c;
     this.customers.push(c);
     this.ledger.customers += 1;
+    if (table.isPremium) this.seatHostAtPremium(table, c);
     if (regular) {
       this.visitedRegulars.add(regular.id);
       this.ledger.regularVisits += 1;

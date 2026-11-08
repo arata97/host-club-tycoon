@@ -67,8 +67,9 @@ export function acceptBlockReason(state: GameState, inv: Invitation): string | n
   if (inv.status !== "pending") return "回答済み";
   if (!regularOf(state, inv)) return "店を離れました";
   if (inv.kind === "dohan") {
-    const accepted = state.dohanOffers.filter((o) => o.status === "accepted").length;
-    if (accepted >= state.tableCount) return "同伴は卓数までです";
+    const accepted = state.dohanOffers.filter((o) => o.status === "accepted").map((o) => o.hostId);
+    if (accepted.length >= state.tableCount) return "同伴は卓数までです";
+    if (!state.canSeatHosts([...accepted, inv.hostId])) return "このホストが着ける席が足りません";
   }
   return null;
 }

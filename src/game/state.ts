@@ -2,7 +2,8 @@ import { GACHA, RARITIES, type Rarity, rarityRank, SAVE, UPGRADES, type UpgradeK
 import { type AssignPolicy, CUSTOMER_TYPES, type CustomerType, REGULAR, regularName, STAMINA } from "./data/customers";
 import { LOAN, startingCash } from "./data/economy";
 import { HOST_ROSTER, type HostDef } from "./data/hosts";
-import type { DayReport } from "./ledger";
+import { CARRIAGE, CHECKOUT, MAX_SHOP_LEVEL, MONTHLY, type SeatGrade, SEAT_GRADES, SEATS, shopDef, type ShopDef, upgradeCap } from "./data/shops";
+import type { DayReport, HostPay } from "./ledger";
 
 export interface OwnedHost {
   /** 限界突破段階（0〜GACHA.limitBreakMax） */
@@ -69,6 +70,9 @@ export interface SaveData {
   manualRoster: string[];
   dohanOffers: Invitation[];
   nextInvitationId: number;
+  monthSales: Record<string, number>;
+  monthDays: number;
+  no1HostId: string | null;
   savedAt: number;
 }
 
@@ -83,13 +87,18 @@ export class GameState {
   totalRevenue = 0;
   upgrades: Record<UpgradeKey, number> = {
     table: 0,
+    vip: 0,
+    exe: 0,
+    throne: 0,
+    register: 0,
+    carriage: 0,
     cellar: 0,
     speed: 0,
     carry: 0,
     staff: 0,
     staffLv: 0,
   };
-  /** 現在の店舗（1〜5）。店舗解放はフェーズ3d */
+  /** 現在の店舗（1〜6）。移転で上がる */
   shopLevel = 1;
   hosts: Record<string, OwnedHost> = {};
   pity = 0;
@@ -121,10 +130,121 @@ export class GameState {
   dohanOffers: Invitation[] = [];
   nextInvitationId = 1;
 
+  // ---- 月間No.1（店舗4以降） ----
+  monthSales: Record<string, number> = {};
+  monthDays = 0;
+  no1HostId: string | null = null;
+
   // ---------- 店舗 ----------
 
+  get shop(): ShopDef {
+    return shopDef(this.shopLevel);
+  }
+
+  /** その席の現在の数（店舗の上限を超えて買っていた分は数えない） */
+  seatCount(grade: SeatGrade): number {
+    const seats = this.shop.seats;
+    switch (grade) {
+      case "general":
+        return Math.min(1 + this.upgrades.table, seats.general);
+      case "vip":
+        return Math.min(this.upgrades.vip, seats.vip);
+      case "exe":
+        return Math.min(this.upgrades.exe, seats.exe);
+      case "god":
+        return Math.min(this.upgrades.throne, seats.god);
+    }
+  }
+
+  /** 全席の数。出勤枠もこの数 */
   get tableCount(): number {
-    return 1 + this.upgrades.table;
+    return SEAT_GRADES.reduce((a, g) => a + this.seatCount(g), 0);
+  }
+
+  /** このホストたち全員を、着ける席に座らせられるか（同伴の受諾判定） */
+  canSeatHosts(ids: readonly string[]): boolean {
+    const ranks = ids.map((id) => rarityRank(HOST_ROSTER.find((d) => d.id === id)?.rarity ?? "N"));
+    let seats = 0;
+    for (let i = 0; i < SEAT_GRADES.length; i++) {
+      const grade = SEAT_GRADES[i];
+      if (!grade) continue;
+      seats += this.seatCount(grade);
+      const upper = SEAT_GRADES[i + 1];
+      const upperMin = upper ? rarityRank(SEATS[upper].minRarity ?? "N") : Infinity;
+      // ここより上の席に着けないホストは、ここまでの席に収まる必要がある
+      if (ranks.filter((r) => r < upperMin).length > seats) return false;
+    }
+    return true;
+  }
+
+  get nextShop(): ShopDef | null {
+    return this.shopLevel < MAX_SHOP_LEVEL ? shopDef(this.shopLevel + 1) : null;
+  }
+
+  /** 次の店舗へ移転できない理由（資金以外）。条件を満たしていれば null */
+  relocationBlock(): string | null {
+    const next = this.nextShop;
+    if (!next) return "これ以上の店舗はありません";
+    if (next.needsFullCollection) {
+      const missing = HOST_ROSTER.filter((d) => !this.owns(d.id)).length;
+      if (missing > 0) return `図鑑の完成が条件です（あと ${missing} 人）`;
+    }
+    if (this.totalRevenue < next.unlockRevenue) return "累計売上が足りません";
+    return null;
+  }
+
+  /** 移転費用に足りない額 */
+  relocationShortfall(): number {
+    const next = this.nextShop;
+    return next ? Math.max(0, next.moveCost - this.money) : 0;
+  }
+
+  /** 次の店舗へ移転する。borrow なら足りない分を借りる。設備と内勤は持っていく */
+  relocate(borrow = false): boolean {
+    const next = this.nextShop;
+    if (!next || this.relocationBlock() !== null) return false;
+    const shortfall = Math.ceil(this.relocationShortfall());
+    if (shortfall > 0 && (!borrow || !this.borrow(shortfall))) return false;
+    this.money -= next.moveCost;
+    this.shopLevel = next.level;
+    return true;
+  }
+
+  /** レジが動いているか（会計を代行する内勤が必要） */
+  get registerActive(): boolean {
+    return this.upgrades.register > 0 && this.staffCount > 0;
+  }
+
+  /** 帰る客の会計にかかる時間（分）。0 なら会計なし */
+  get checkoutMin(): number {
+    if (this.shopLevel < CHECKOUT.fromShop) return 0;
+    return this.registerActive ? CHECKOUT.registerMin : CHECKOUT.waitMin;
+  }
+
+  /** 閉店時に担当売上を集計し、期間の最終日なら月間No.1を発表する */
+  recordMonthly(pays: readonly HostPay[]): { name: string; sales: number } | null {
+    if (this.shopLevel < MONTHLY.fromShop) return null;
+    for (const p of pays) this.monthSales[p.id] = (this.monthSales[p.id] ?? 0) + p.sales;
+    this.monthDays += 1;
+    if (this.monthDays < MONTHLY.days) return null;
+
+    let top: string | null = null;
+    let topSales = 0;
+    for (const [id, sales] of Object.entries(this.monthSales)) {
+      if (sales > topSales) {
+        top = id;
+        topSales = sales;
+      }
+    }
+    this.no1HostId = top;
+    this.monthSales = {};
+    this.monthDays = 0;
+    const name = HOST_ROSTER.find((d) => d.id === top)?.name;
+    return name ? { name, sales: topSales } : null;
+  }
+
+  upgradeLimit(key: UpgradeKey): number {
+    return upgradeCap(key, this.shopLevel);
   }
   get cellarLevel(): number {
     return 1 + this.upgrades.cellar;
@@ -140,7 +260,7 @@ export class GameState {
     return upgradeCost(key, this.upgrades[key]);
   }
   isMaxed(key: UpgradeKey): boolean {
-    return this.upgrades[key] >= UPGRADES[key].max;
+    return this.upgrades[key] >= this.upgradeLimit(key);
   }
   canBuy(key: UpgradeKey): boolean {
     return !this.isMaxed(key) && this.money >= this.costOf(key);
@@ -301,7 +421,8 @@ export class GameState {
     return 1 + this.collectionBonus() + (this.godOnFloor() ? GACHA.godRevenueBonus : 0);
   }
   spawnFactor(): number {
-    return this.godOnFloor() ? GACHA.godSpawnFactor : 1;
+    const carriage = 1 - CARRIAGE.perLevel * Math.min(this.upgrades.carriage, this.upgradeLimit("carriage"));
+    return (this.godOnFloor() ? GACHA.godSpawnFactor : 1) * carriage;
   }
 
   // ---------- 太客 ----------
@@ -358,6 +479,9 @@ export class GameState {
       manualRoster: [...this.manualRoster],
       dohanOffers: structuredClone(this.dohanOffers),
       nextInvitationId: this.nextInvitationId,
+      monthSales: { ...this.monthSales },
+      monthDays: this.monthDays,
+      no1HostId: this.no1HostId,
       savedAt: Date.now(),
     };
   }
@@ -368,7 +492,7 @@ export class GameState {
     for (const key of Object.keys(s.upgrades) as UpgradeKey[]) {
       s.upgrades[key] = clampInt(num(data.upgrades?.[key]), 0, UPGRADES[key].max);
     }
-    s.shopLevel = clampInt(num(data.shopLevel) || 1, 1, 5);
+    s.shopLevel = clampInt(num(data.shopLevel) || 1, 1, MAX_SHOP_LEVEL);
     s.pity = clampInt(num(data.pity), 0, GACHA.pity);
     s.totalPulls = clampInt(num(data.totalPulls), 0, Number.MAX_SAFE_INTEGER);
 
@@ -442,6 +566,13 @@ export class GameState {
             status: o.status,
           }));
       }
+    }
+    if (data.v >= 7) {
+      if (data.monthSales && typeof data.monthSales === "object") {
+        for (const [id, v] of Object.entries(data.monthSales)) if (s.owns(id)) s.monthSales[id] = Math.max(0, num(v));
+      }
+      s.monthDays = clampInt(num(data.monthDays), 0, MONTHLY.days);
+      s.no1HostId = typeof data.no1HostId === "string" && s.owns(data.no1HostId) ? data.no1HostId : null;
     }
     return s;
   }

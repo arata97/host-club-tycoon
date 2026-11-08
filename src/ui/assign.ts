@@ -64,7 +64,7 @@ export class AssignUI extends BasePanel {
   refresh(force = false): void {
     const t = this.table;
     const c = t?.customer;
-    if (!t || !c || c.phase === "leaving" || c.phase === "gone") {
+    if (!t || !c || c.phase === "leaving" || c.phase === "gone" || c.phase === "checkout") {
       if (this.isOpen) this.close();
       return;
     }
@@ -78,7 +78,7 @@ export class AssignUI extends BasePanel {
     this.infoEl.innerHTML = "";
     const title = document.createElement("div");
     title.className = "assign-title";
-    title.textContent = `${t.index + 1}番卓 ／ ${c.regular ? `${c.regular.name}（太客）` : `一見の${c.type}`}${c.vip ? " ／ VIP" : ""}`;
+    title.textContent = `${t.isPremium ? `${t.seat.label}（${t.seat.minRarity} 以上）` : `${t.index + 1}番卓`} ／ ${c.regular ? `${c.regular.name}（太客）` : `一見の${c.type}`}${c.vip ? " ／ VIP" : ""}`;
     const prefs = document.createElement("div");
     prefs.className = "assign-prefs";
     prefs.textContent = `好み: ${td.likes.join("・")}　苦手: ${td.dislikes ?? "なし"}　残り予算 ${formatG(c.budget)}`;
@@ -100,7 +100,8 @@ export class AssignUI extends BasePanel {
       row.dataset.rarity = h.def.rarity;
       if (t.host === h) row.classList.add("current");
       const tired = h.stamina < STAMINA.minToServe;
-      row.disabled = h.stamina < 1;
+      const eligible = t.accepts(h);
+      row.disabled = h.stamina < 1 || !eligible;
 
       const key = document.createElement("span");
       key.className = "assign-key";
@@ -129,7 +130,8 @@ export class AssignUI extends BasePanel {
 
       const status = document.createElement("span");
       status.className = "assign-status";
-      if (t.host === h) status.textContent = "この卓";
+      if (!eligible) status.textContent = "席の条件外";
+      else if (t.host === h) status.textContent = "この卓";
       else if (h.table) status.textContent = `${h.table.index + 1}番卓から移動`;
       else status.textContent = tired ? "疲労" : "待機";
 
@@ -142,7 +144,7 @@ export class AssignUI extends BasePanel {
     off.type = "button";
     off.className = "assign-row off";
     off.innerHTML = `<span class="assign-key">0</span><span class="assign-name">ホストを外す（店長がヘルプに入る）</span>`;
-    off.disabled = t.host === null && t.autoBlocked;
+    off.disabled = t.isPremium || (t.host === null && t.autoBlocked);
     off.addEventListener("click", () => this.choose(null));
     this.listEl.appendChild(off);
   }

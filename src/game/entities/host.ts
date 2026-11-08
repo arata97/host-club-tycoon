@@ -2,6 +2,7 @@ import { GACHA, HOST_PATIENCE_DRAIN, HOST_RARITY, type HostingEffect } from "../
 import { STAMINA } from "../data/customers";
 import type { HostDef } from "../data/hosts";
 import { RACES } from "../data/races";
+import { MONTHLY } from "../data/shops";
 import type { OwnedHost } from "../state";
 import { moveToward } from "../util";
 import type { Table } from "./table";
@@ -51,6 +52,8 @@ export class Host {
   animT = 0;
   /** 23:00 以降か（吸血鬼の特技用。World が毎フレーム設定） */
   lateNight = false;
+  /** 前期の月間No.1か（World が設定） */
+  isNo1 = false;
 
   constructor(
     public x: number,
@@ -72,7 +75,8 @@ export class Host {
     return this.owned.stamina;
   }
   get effect(): HostEffect {
-    return hostEffect(this.def, this.owned.lb, this.owned.stamina, this.lateNight);
+    const e = hostEffect(this.def, this.owned.lb, this.owned.stamina, this.lateNight);
+    return this.isNo1 ? { ...e, revenueMultiplier: e.revenueMultiplier * (1 + MONTHLY.bonus) } : e;
   }
   /** 卓に着ける状態か（手が空いていて、スタミナが足りている） */
   get available(): boolean {

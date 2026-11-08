@@ -65,6 +65,8 @@ export function drawHost(ctx: CanvasRenderingContext2D, h: Host): void {
     ctx.fillText("♪", px - 10, py - 22 + bob);
   }
 
+  if (h.isNo1) drawCrown(ctx, px, py, UI_TEXT.vipGold);
+
   const lb = h.limitBreak > 0 ? `+${h.limitBreak}` : "";
   drawNameTag(ctx, h.x, h.y, `${h.def.name}${lb}`, RARITY_COLOR[rarity]);
 
@@ -116,6 +118,10 @@ export function drawCustomer(ctx: CanvasRenderingContext2D, c: Customer): void {
     ctx.fillRect(px - 7, py - 10, 2, 3);
     ctx.fillStyle = "#fffaf0";
     ctx.fillRect(px - 7, py - 7, 2, 1);
+  } else if (c.phase === "checkout") {
+    ctx.font = "bold 7px monospace";
+    ctx.fillStyle = UI_TEXT.gold;
+    ctx.fillText("会計", px + 6, py - 20);
   } else if (c.phase === "leaving" && c.angry) {
     ctx.font = "bold 8px monospace";
     ctx.fillStyle = UI_TEXT.danger;

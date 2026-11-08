@@ -7,7 +7,7 @@ import { moveToward } from "../util";
 import type { Host } from "./host";
 import type { Table } from "./table";
 
-export type CustomerPhase = "walking" | "waiting" | "drinking" | "leaving" | "gone";
+export type CustomerPhase = "walking" | "waiting" | "drinking" | "checkout" | "leaving" | "gone";
 
 /** 退店の理由 */
 export type LeaveReason = "angry" | "budget" | "satisfied" | "closed";
@@ -21,6 +21,8 @@ export interface CustomerInit {
   regular: Regular | null;
   /** 同伴での来店か */
   dohan?: boolean;
+  /** 帰るときの会計にかかる時間（分）。0 なら会計なし */
+  checkoutMin?: number;
 }
 
 /**
@@ -55,6 +57,9 @@ export class Customer {
   lastPaid = 0;
   lastOrder: Product;
   leaveReason: LeaveReason | null = null;
+  /** 会計が済んだら帰る理由 */
+  private pendingLeave: LeaveReason = "satisfied";
+  private readonly checkoutMin: number;
   /** 退店処理（太客・好感度）を World が済ませたか */
   departureHandled = false;
   readonly look = Math.floor(Math.random() * 1000);
@@ -79,6 +84,7 @@ export class Customer {
     this.vip = init.vip;
     this.regular = init.regular;
     this.dohan = init.dohan ?? false;
+    this.checkoutMin = init.checkoutMin ?? 0;
     this.budget = init.budget;
     this.initialBudget = init.budget;
     this.baseStayMin = STAY.baseMin + Math.random() * (STAY.baseMax - STAY.baseMin);
@@ -102,7 +108,7 @@ export class Customer {
   }
 
   get stayLimitMin(): number {
-    const extra = this.effect?.extraOrders ?? 0;
+    const extra = (this.effect?.extraOrders ?? 0) + this.table.seat.extraOrders;
     return Math.min(STAY.cap, this.baseStayMin + extra * STAY.perExtraOrder);
   }
 
@@ -114,9 +120,9 @@ export class Customer {
     return this.host && this.host.def.id === this.nominatedHostId ? REGULAR.nominationMultiplier : 1;
   }
 
-  /** 注文の基本額（VIP倍率のみ。予算判定用） */
+  /** 注文の基本額（VIP倍率と席の倍率。予算判定用） */
   basePriceOf(p: Product): number {
-    return p.price * (this.vip ? CUSTOMER.vipMultiplier : 1);
+    return p.price * (this.vip ? CUSTOMER.vipMultiplier : 1) * this.table.seat.priceMultiplier;
   }
 
   /** 現在の注文の支払額（VIP・接客・相性・指名込み。全体倍率は World が掛ける） */
@@ -151,7 +157,15 @@ export class Customer {
   }
 
   closeOut(): void {
-    if (this.phase === "walking" || this.phase === "waiting" || this.phase === "drinking") this.startLeaving("closed");
+    if (this.phase === "checkout") this.startLeaving(this.pendingLeave);
+    else if (this.phase === "walking" || this.phase === "waiting" || this.phase === "drinking") this.startLeaving("closed");
+  }
+
+  /** 店長が会計を済ませる */
+  completeCheckout(): boolean {
+    if (this.phase !== "checkout") return false;
+    this.startLeaving(this.pendingLeave);
+    return true;
   }
 
   /**
@@ -194,19 +208,24 @@ export class Customer {
           this.budget -= this.basePriceOf(this.order);
           this.drinksHad += 1;
           if (this.hasHost && this.seatedMin < this.stayLimitMin) {
-            const next = rollOrder(this.maxGrade, this.vip, this.effect?.orderBonus ?? 0);
-            if (this.basePriceOf(next) <= this.budget) {
+            const next = this.rollAffordable();
+            if (next) {
               this.order = next;
               this.patience = CUSTOMER.patience;
               this.phase = "waiting";
             } else {
-              this.startLeaving("budget");
+              this.finishVisit("budget");
             }
           } else {
-            this.startLeaving("satisfied");
+            this.finishVisit("satisfied");
           }
           return "paid";
         }
+        return null;
+      }
+      case "checkout": {
+        this.timer -= dt;
+        if (this.timer <= 0) this.startLeaving(this.pendingLeave);
         return null;
       }
       case "leaving": {
@@ -219,6 +238,30 @@ export class Customer {
       case "gone":
         return null;
     }
+  }
+
+  /** 予算内の次の1杯を選ぶ。数回選んでも届かなければ null（予算切れ） */
+  private rollAffordable(): Product | null {
+    for (let i = 0; i < 4; i++) {
+      const p = rollOrder(this.maxGrade, this.vip, this.effect?.orderBonus ?? 0, this.table.grade === "exe");
+      if (this.basePriceOf(p) <= this.budget) return p;
+    }
+    return null;
+  }
+
+  /** 飲み終えて帰る。会計が必要な店では、済むまで席を空けない（ホストは先に次の卓へ） */
+  private finishVisit(reason: LeaveReason): void {
+    if (this.checkoutMin <= 0) {
+      this.startLeaving(reason);
+      return;
+    }
+    this.pendingLeave = reason;
+    this.phase = "checkout";
+    this.timer = this.checkoutMin;
+    const h = this.host;
+    this.host = null;
+    this.hostedByPlayer = false;
+    h?.release();
   }
 
   private walkTo(tx: number, ty: number, speed: number, dt: number): boolean {

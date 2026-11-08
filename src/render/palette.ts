@@ -1,5 +1,6 @@
 import type { Grade } from "../game/data/products";
 import type { Rarity } from "../game/data/balance";
+import type { SeatGrade } from "../game/data/shops";
 
 /**
  * 配色の定義。グラフィック差し替え時はこのファイルと src/render/ 配下だけを触る想定。
@@ -50,6 +51,25 @@ export const ROOM = {
   label: "#8a7fa0",
   bench: "#3a2a4f",
 } as const;
+
+/** 店舗ごとの内装（床と壁）。index は店舗レベル */
+export const SHOP_THEMES: ReadonlyArray<{ wall: string; wallTrim: string; floorA: string; floorB: string }> = [
+  { wall: ROOM.wall, wallTrim: ROOM.wallTrim, floorA: ROOM.floorA, floorB: ROOM.floorB },
+  { wall: ROOM.wall, wallTrim: ROOM.wallTrim, floorA: ROOM.floorA, floorB: ROOM.floorB },
+  { wall: "#1f2440", wallTrim: "#2f3760", floorA: "#27305a", floorB: "#212950" },
+  { wall: "#2e2440", wallTrim: "#4a3a66", floorA: "#3d3058", floorB: "#34294c" },
+  { wall: "#3a2a18", wallTrim: "#6b4e24", floorA: "#4f3a1e", floorB: "#44321a" },
+  { wall: "#1a0f24", wallTrim: "#4a1540", floorA: "#2c1030", floorB: "#240c28" },
+  { wall: "#c9c3e6", wallTrim: "#f4e7c3", floorA: "#8f88b8", floorB: "#8078ab" },
+];
+
+/** 席グレードの色 */
+export const SEAT_COLOR: Record<SeatGrade, { sofa: string; sofaTop: string; table: string; tableTop: string }> = {
+  general: { sofa: "#7a1f3a", sofaTop: "#a02a4e", table: "#3a3350", tableTop: "#5c5378" },
+  vip: { sofa: "#8a6a1f", sofaTop: "#c9a23a", table: "#2b2438", tableTop: "#6b5a30" },
+  exe: { sofa: "#4a1f7a", sofaTop: "#7a3fc0", table: "#1f1630", tableTop: "#5a3f90" },
+  god: { sofa: "#d8cfa8", sofaTop: "#fff6d0", table: "#b8a860", tableTop: "#fff2b0" },
+};
 
 export const UI_TEXT = {
   gold: "#f6c453",

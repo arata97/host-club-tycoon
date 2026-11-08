@@ -5,6 +5,10 @@ export interface Product {
   name: string;
   grade: Grade;
   price: number;
+  /** EXE VIP席でのみ注文される */
+  exeOnly?: boolean;
+  /** 提供するとシャンパンコールが起きる */
+  call?: boolean;
 }
 
 export const PRODUCTS: readonly Product[] = [
@@ -35,32 +39,36 @@ export const PRODUCTS: readonly Product[] = [
   { name: "モエ・エ・ダンジョン", grade: 3, price: 98_000 },
   { name: "モエ・エ・ダンジョン ロゼ", grade: 3, price: 112_000 },
   { name: "モエ・エ・ダンジョン 氷帝の冠", grade: 3, price: 140_000 },
-  { name: "ドン・フェニオン", grade: 3, price: 420_000 },
-  { name: "ベル・エルポック", grade: 3, price: 560_000 },
-  { name: "アルマドラ〈黄金竜〉", grade: 3, price: 700_000 },
-  { name: "ドン・フェニオン 不死鳥のロゼ", grade: 3, price: 840_000 },
+  { name: "ドン・フェニオン", grade: 3, price: 420_000, call: true },
+  { name: "ベル・エルポック", grade: 3, price: 560_000, call: true },
+  { name: "アルマドラ〈黄金竜〉", grade: 3, price: 700_000, call: true },
+  { name: "ドン・フェニオン 不死鳥のロゼ", grade: 3, price: 840_000, call: true },
   // グレード4（高級店以降）
-  { name: "アルマドラ〈薔薇竜〉", grade: 4, price: 1_000_000 },
-  { name: "エンジェル・ドゥミセラフ ロゼ", grade: 4, price: 1_200_000 },
-  { name: "アルマドラ〈翠玉竜〉", grade: 4, price: 1_300_000 },
-  { name: "アルマドラ〈白銀竜〉", grade: 4, price: 1_500_000 },
-  { name: "エンジェル・ドゥミセラフ 白金の古酒", grade: 4, price: 2_500_000 },
+  { name: "アルマドラ〈薔薇竜〉", grade: 4, price: 1_000_000, call: true },
+  { name: "エンジェル・ドゥミセラフ ロゼ", grade: 4, price: 1_200_000, call: true },
+  { name: "アルマドラ〈翠玉竜〉", grade: 4, price: 1_300_000, call: true },
+  { name: "アルマドラ〈白銀竜〉", grade: 4, price: 1_500_000, call: true },
+  { name: "エンジェル・ドゥミセラフ 白金の古酒", grade: 4, price: 2_500_000, call: true },
   { name: "天帝の秘蔵酒〈インペリアル・エッグ〉", grade: 4, price: 3_000_000 },
   { name: "ヘネシエルの失楽園〈皇帝蔵〉", grade: 4, price: 3_500_000 },
-  { name: "ドン・フェニオン 失われた修道院", grade: 4, price: 4_200_000 },
+  { name: "ドン・フェニオン 失われた修道院", grade: 4, price: 4_200_000, call: true },
   { name: "竜王ルイ十三世", grade: 4, price: 8_400_000 },
-  { name: "世界樹のシャンパンタワー", grade: 4, price: 10_000_000 },
+  { name: "世界樹のシャンパンタワー", grade: 4, price: 10_000_000, exeOnly: true, call: true },
 ];
 
-/** 酒蔵Lvで提供できる上限グレード。グレード4は店舗3以降（フェーズ3で解放）。 */
-export function maxGradeForCellar(level: number): Grade {
-  if (level >= 6) return 3;
+/** 酒蔵Lvと店舗で提供できる上限グレード。グレード4は店舗3以降（酒蔵Lv6 が必要） */
+export function maxGradeFor(level: number, shopLevel: number): Grade {
+  if (level >= 6) return shopLevel >= 3 ? 4 : 3;
   if (level >= 3) return 2;
   return 1;
 }
 
 export function productsUpTo(grade: Grade): Product[] {
   return PRODUCTS.filter((p) => p.grade <= grade);
+}
+
+function orderable(grade: number, exeSeat: boolean): Product[] {
+  return PRODUCTS.filter((p) => p.grade === grade && (exeSeat || !p.exeOnly));
 }
 
 function pick<T>(arr: readonly T[]): T {
@@ -74,9 +82,10 @@ function pick<T>(arr: readonly T[]): T {
  * - 通常客: 提供可能グレードから、低グレードほど出やすい重み付きで選ぶ
  * - VIP: 最高グレードの中からランダム
  * - orderBonus: 着いているホストの格（0〜4）。大きいほど高グレードに寄る
+ * - exeSeat: EXE VIP席か（世界樹のシャンパンタワーはここでのみ注文される）
  */
-export function rollOrder(maxGrade: Grade, vip: boolean, orderBonus = 0): Product {
-  if (vip) return pick(PRODUCTS.filter((p) => p.grade === maxGrade));
+export function rollOrder(maxGrade: Grade, vip: boolean, orderBonus = 0, exeSeat = false): Product {
+  if (vip) return pick(orderable(maxGrade, exeSeat));
   // グレード g の重み = (maxGrade - g + 1) + orderBonus × g
   const weights: number[] = [];
   for (let g = 1; g <= maxGrade; g++) weights.push(maxGrade - g + 1 + orderBonus * g);
@@ -90,5 +99,5 @@ export function rollOrder(maxGrade: Grade, vip: boolean, orderBonus = 0): Produc
       break;
     }
   }
-  return pick(PRODUCTS.filter((p) => p.grade === grade));
+  return pick(orderable(grade, exeSeat));
 }

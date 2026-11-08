@@ -689,6 +689,7 @@ button {
 
 .office-body {
   min-height: 120px;
+  flex-shrink: 0;
 }
 .office-empty {
   font-size: 12px;
@@ -740,6 +741,57 @@ button {
   color: var(--muted);
   line-height: 1.6;
   font-size: 11px;
+}
+
+/* 店舗（移転） */
+.store-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.store-row {
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.store-row.current {
+  border-color: var(--gold);
+}
+.store-row.far {
+  opacity: 0.55;
+}
+.store-title {
+  font-weight: 700;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.store-badge {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--gold);
+  white-space: nowrap;
+}
+.store-detail {
+  color: var(--sub);
+}
+.store-feature {
+  color: var(--muted);
+  font-size: 11px;
+}
+.store-move {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: flex-start;
+}
+.shop-row.locked {
+  opacity: 0.5;
 }
 
 /* 日報 */

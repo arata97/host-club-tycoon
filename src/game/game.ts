@@ -53,6 +53,7 @@ export class Game implements Loopable {
     hosts: document.getElementById("hud-hosts"),
     sale: document.getElementById("hud-sale"),
     day: document.getElementById("hud-day"),
+    shop: document.getElementById("hud-shop"),
     clock: document.getElementById("hud-clock"),
     clockBar: document.getElementById("hud-clockbar"),
     openBtn: document.getElementById("open-btn"),
@@ -315,6 +316,7 @@ export class Game implements Loopable {
     if (h.carry) h.carry.textContent = `🍾 ${this.world.player.carrying}/${Player.carryFor(s.upgrades.carry)}`;
     if (h.hosts) h.hosts.textContent = `ホスト ${this.world.hosts.length}/${s.tableCount}`;
     if (h.day) h.day.textContent = `Day ${s.day}${s.rebirths > 0 ? ` (${s.rebirths}周目)` : ""}`;
+    if (h.shop && h.shop.textContent !== s.shop.name) h.shop.textContent = s.shop.name;
     if (h.clock) {
       h.clock.textContent = s.phase === "open" ? formatClock(Math.min(s.clockMin, DAY.lengthMin)) : s.phase === "preopen" ? "開店前" : "閉店";
     }

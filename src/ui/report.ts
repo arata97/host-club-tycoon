@@ -31,6 +31,8 @@ export function renderReport(r: DayReport): HTMLElement {
   left.append(
     row("売上", formatG(r.sales), "plus"),
     ...((r.dohans ?? 0) > 0 ? [row(`　うち同伴料（${r.dohans} 件）`, formatG(r.dohanFees ?? 0))] : []),
+    ...((r.premiumSales ?? 0) > 0 ? [row("　うち上位席", formatG(r.premiumSales ?? 0))] : []),
+    ...((r.champagneCalls ?? 0) > 0 ? [row(`　シャンパンコール ${r.champagneCalls} 回`, "")] : []),
     row(`　来店 ${r.customers} 組（VIP ${r.vipVisits}）／ 提供 ${r.bottles} 本`, ""),
     row(`　待ちきれず退店 ${r.walkouts} 組`, "", r.walkouts > 0 ? "warn" : ""),
     row(`　太客の来店 ${r.regularVisits ?? 0} 組（指名で接客 ${r.nominationsServed ?? 0}）`, ""),
@@ -73,6 +75,9 @@ export function renderReport(r: DayReport): HTMLElement {
     if (byGuarantee) pay.classList.add("warn");
     el.append(name, sales, pay);
     right.appendChild(el);
+  }
+  if (r.monthlyNo1) {
+    right.appendChild(row(`👑 月間No.1: ${r.monthlyNo1.name}`, formatG(r.monthlyNo1.sales), "plus"));
   }
   if (r.salesByPlayer > 0) right.appendChild(row("店長の接客売上", formatG(r.salesByPlayer)));
   const news = r.newRegulars ?? [];
