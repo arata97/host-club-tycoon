@@ -21,6 +21,21 @@ export interface Regular {
   /** 好感度 0〜100。0 で店を離れる */
   affinity: number;
   visits: number;
+  /** アフターの直後。次回の来店が早まり予算が増える（来店で消費） */
+  afterBoost: boolean;
+}
+
+/**
+ * 同伴・アフターの誘い。
+ * accepted は受けた状態、used は同伴が当日の来店に使われた状態（その日は出勤確定のまま）。
+ */
+export interface Invitation {
+  id: number;
+  kind: "after" | "dohan";
+  regularId: number;
+  regularName: string;
+  hostId: string;
+  status: "pending" | "accepted" | "declined" | "used";
 }
 
 /** 1日の中の状態。preopen=開店前（時間停止）、open=営業中、closing=閉店精算、bankrupt=倒産画面 */
@@ -52,6 +67,8 @@ export interface SaveData {
   policy: AssignPolicy;
   rosterMode: RosterMode;
   manualRoster: string[];
+  dohanOffers: Invitation[];
+  nextInvitationId: number;
   savedAt: number;
 }
 
@@ -96,6 +113,13 @@ export class GameState {
   policy: AssignPolicy = "affinity";
   rosterMode: RosterMode = "auto";
   manualRoster: string[] = [];
+
+  // ---- 同伴・アフター ----
+  /** 閉店時に届いたアフターの誘い（閉店画面でのみ使い、セーブしない） */
+  afterOffers: Invitation[] = [];
+  /** 翌日の同伴の誘い。受けたものは当日の閉店後まで残る */
+  dohanOffers: Invitation[] = [];
+  nextInvitationId = 1;
 
   // ---------- 店舗 ----------
 
@@ -206,21 +230,33 @@ export class GameState {
     );
   }
 
-  /** 自動で選んだ場合の出勤メンバー（レア度順にテーブル数ぶん） */
+  /** 同伴を受けていて、今日の出勤が確定しているホスト */
+  pinnedHostIds(): Set<string> {
+    return new Set(this.dohanOffers.filter((o) => o.status === "accepted" || o.status === "used").map((o) => o.hostId));
+  }
+
+  /** 同伴で出勤確定のホストを先頭にして、枠ぶんに切り詰める */
+  private withPinned(candidates: HostDef[]): HostDef[] {
+    const pinned = this.pinnedHostIds();
+    const pins = this.byRank(this.ownedDefs().filter((d) => pinned.has(d.id)));
+    const rest = this.byRank(candidates.filter((d) => !pinned.has(d.id)));
+    return [...pins, ...rest].slice(0, this.tableCount);
+  }
+
+  /** 自動で選んだ場合の出勤メンバー（同伴の確定分＋レア度順にテーブル数ぶん） */
   autoRoster(): HostDef[] {
-    return this.byRank(this.ownedDefs()).slice(0, this.tableCount);
+    return this.withPinned(this.ownedDefs());
   }
 
   /** 出勤メンバー。手動モードでは選んだ人だけ（枠を超えた分は切り捨て） */
   onFloorDefs(): HostDef[] {
     if (this.rosterMode === "auto") return this.autoRoster();
-    const picked = this.manualRoster.filter((id) => this.owns(id));
-    return this.byRank(HOST_ROSTER.filter((d) => picked.includes(d.id))).slice(0, this.tableCount);
+    return this.withPinned(HOST_ROSTER.filter((d) => this.owns(d.id) && this.manualRoster.includes(d.id)));
   }
 
-  /** 手動の出勤メンバーを切り替える。枠が埋まっていれば追加しない */
+  /** 手動の出勤メンバーを切り替える。枠が埋まっていれば追加しない。同伴で確定の人は外せない */
   toggleRoster(id: string): boolean {
-    if (!this.owns(id)) return false;
+    if (!this.owns(id) || this.pinnedHostIds().has(id)) return false;
     if (this.rosterMode === "auto") {
       this.rosterMode = "manual";
       this.manualRoster = this.autoRoster().map((d) => d.id);
@@ -230,7 +266,8 @@ export class GameState {
       this.manualRoster.splice(i, 1);
       return true;
     }
-    if (this.manualRoster.filter((x) => this.owns(x)).length >= this.tableCount) return false;
+    const used = new Set([...this.manualRoster.filter((x) => this.owns(x)), ...this.pinnedHostIds()]);
+    if (used.size >= this.tableCount) return false;
     this.manualRoster.push(id);
     return true;
   }
@@ -277,7 +314,15 @@ export class GameState {
   addRegular(type: CustomerType, hostId: string): Regular | null {
     if (this.regularsOf(hostId).length >= REGULAR.maxPerHost) return null;
     const id = this.nextRegularId++;
-    const r: Regular = { id, name: regularName(type, id * 7 + this.day), type, hostId, affinity: REGULAR.initialAffinity, visits: 1 };
+    const r: Regular = {
+      id,
+      name: regularName(type, id * 7 + this.day),
+      type,
+      hostId,
+      affinity: REGULAR.initialAffinity,
+      visits: 1,
+      afterBoost: false,
+    };
     this.regulars.push(r);
     return r;
   }
@@ -311,6 +356,8 @@ export class GameState {
       policy: this.policy,
       rosterMode: this.rosterMode,
       manualRoster: [...this.manualRoster],
+      dohanOffers: structuredClone(this.dohanOffers),
+      nextInvitationId: this.nextInvitationId,
       savedAt: Date.now(),
     };
   }
@@ -350,6 +397,8 @@ export class GameState {
       s.rebirths = clampInt(num(data.rebirths), 0, 1000);
       s.recentSales = Array.isArray(data.recentSales) ? data.recentSales.map(num).slice(-30) : [];
       s.lastReport = data.lastReport && typeof data.lastReport === "object" ? (data.lastReport as DayReport) : null;
+      // 閉店精算は済んでいるので、精算画面で終了した場合は翌日の開店前から
+      if (s.phase === "closing") s.day += 1;
       if (s.phase === "open" || s.phase === "closing") {
         s.phase = "preopen";
         s.clockMin = 0;
@@ -369,11 +418,30 @@ export class GameState {
           hostId: r.hostId,
           affinity: Math.max(1, Math.min(100, num(r.affinity))),
           visits: clampInt(num(r.visits), 0, Number.MAX_SAFE_INTEGER),
+          afterBoost: r.afterBoost === true,
         }));
       s.nextRegularId = Math.max(clampInt(num(data.nextRegularId), 1, Number.MAX_SAFE_INTEGER), ...s.regulars.map((r) => r.id + 1), 1);
       s.policy = POLICIES.includes(data.policy as AssignPolicy) ? (data.policy as AssignPolicy) : "affinity";
       s.rosterMode = data.rosterMode === "manual" ? "manual" : "auto";
       s.manualRoster = Array.isArray(data.manualRoster) ? data.manualRoster.filter((id) => typeof id === "string" && s.owns(id)) : [];
+    }
+
+    if (data.v >= 6) {
+      s.nextInvitationId = Math.max(1, clampInt(num(data.nextInvitationId), 1, Number.MAX_SAFE_INTEGER));
+      // 精算画面で終了していた場合、前日の同伴はもう終わっている
+      if (data.phase !== "closing" && Array.isArray(data.dohanOffers)) {
+        s.dohanOffers = data.dohanOffers
+          .filter((o) => o && o.kind === "dohan" && s.owns(o.hostId) && s.regulars.some((r) => r.id === o.regularId))
+          .filter((o) => ["pending", "accepted", "declined", "used"].includes(o.status))
+          .map((o) => ({
+            id: clampInt(num(o.id), 1, Number.MAX_SAFE_INTEGER),
+            kind: "dohan" as const,
+            regularId: o.regularId,
+            regularName: String(o.regularName ?? "常連"),
+            hostId: o.hostId,
+            status: o.status,
+          }));
+      }
     }
     return s;
   }

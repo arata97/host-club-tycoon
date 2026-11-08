@@ -1,14 +1,18 @@
 import { rentDiscount, startingCash } from "../game/data/economy";
+import { declineAllPending, pendingCount } from "../game/invitations";
 import type { DayReport } from "../game/ledger";
 import type { GameState } from "../game/state";
 import { formatG } from "../game/util";
+import { renderInviteCard } from "./invite";
 import { renderReport } from "./report";
 
 /**
  * 閉店精算画面と倒産（再転生）画面。中央のモーダル。
+ * 閉店時はアフターの誘いに答えてから翌日へ進む。
  */
 export class ClosingUI {
   private readonly root: HTMLElement;
+  private report: DayReport | null = null;
 
   constructor(
     private readonly state: GameState,
@@ -21,6 +25,14 @@ export class ClosingUI {
   }
 
   showReport(r: DayReport): void {
+    this.report = r;
+    this.renderReportView();
+    this.root.classList.add("open");
+  }
+
+  private renderReportView(): void {
+    const r = this.report;
+    if (!r) return;
     this.root.innerHTML = "";
     const box = document.createElement("div");
     box.className = "modal";
@@ -43,15 +55,42 @@ export class ClosingUI {
       box.appendChild(warn);
     }
 
+    const offers = this.state.afterOffers;
+    if (offers.length > 0) {
+      const sec = document.createElement("div");
+      sec.className = "invite-section";
+      const h3 = document.createElement("h3");
+      h3.className = "panel-section";
+      h3.textContent = "アフターの誘い（1ホスト1件まで）";
+      sec.appendChild(h3);
+      for (const inv of offers) sec.appendChild(renderInviteCard(this.state, inv, () => this.renderReportView()));
+      box.appendChild(sec);
+    }
+
+    const pending = pendingCount(offers);
+    const actions = document.createElement("div");
+    actions.className = "closing-actions";
+    if (pending > 0) {
+      const declineAll = document.createElement("button");
+      declineAll.type = "button";
+      declineAll.className = "btn-ghost";
+      declineAll.textContent = `残り ${pending} 件をすべて断る`;
+      declineAll.addEventListener("click", () => {
+        declineAllPending(this.state, offers);
+        this.renderReportView();
+      });
+      actions.appendChild(declineAll);
+    }
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "btn-gold btn-big";
-    btn.textContent = "翌日へ";
+    btn.textContent = pending > 0 ? "誘いに答えてください" : "翌日へ";
+    btn.disabled = pending > 0;
     btn.addEventListener("click", () => this.onNextDay());
-    box.appendChild(btn);
+    actions.appendChild(btn);
+    box.appendChild(actions);
 
     this.root.appendChild(box);
-    this.root.classList.add("open");
   }
 
   showBankrupt(): void {
@@ -79,7 +118,7 @@ export class ClosingUI {
       <div class="rebirth-col"><b>失うもの</b><ul>
         <li>現金・借金</li>
         <li>店舗・テーブル・酒蔵・内勤</li>
-        <li>店長の強化</li>
+        <li>店長の強化・太客</li>
       </ul></div>`;
     box.appendChild(keep);
 
@@ -95,6 +134,7 @@ export class ClosingUI {
   }
 
   hide(): void {
+    this.report = null;
     this.root.classList.remove("open");
     this.root.innerHTML = "";
   }

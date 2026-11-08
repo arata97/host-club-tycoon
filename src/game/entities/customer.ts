@@ -19,6 +19,8 @@ export interface CustomerInit {
   budget: number;
   /** 太客なら、その記録への参照 */
   regular: Regular | null;
+  /** 同伴での来店か */
+  dohan?: boolean;
 }
 
 /**
@@ -30,6 +32,7 @@ export class Customer {
   readonly type: CustomerType;
   readonly vip: boolean;
   readonly regular: Regular | null;
+  readonly dohan: boolean;
   /** 残り予算（G、全体倍率は含まない） */
   budget: number;
   readonly initialBudget: number;
@@ -75,6 +78,7 @@ export class Customer {
     this.type = init.type;
     this.vip = init.vip;
     this.regular = init.regular;
+    this.dohan = init.dohan ?? false;
     this.budget = init.budget;
     this.initialBudget = init.budget;
     this.baseStayMin = STAY.baseMin + Math.random() * (STAY.baseMax - STAY.baseMin);

@@ -122,6 +122,34 @@ export const REGULAR = {
   initialAffinity: 50,
 } as const;
 
+/** 同伴・アフター（§10.9） */
+export const INVITE = {
+  /** 1ホストあたり、1日に届く誘いの上限（受けられるのは1件） */
+  perHostMax: 2,
+  /** 断ったときの好感度の減少 */
+  declineAffinity: 5,
+
+  // アフター: その日に指名で接客した太客から届く
+  afterChanceBase: 0.5,
+  afterChancePerAffinity: 0.003,
+  afterAffinityGain: 20,
+  afterStamina: 40,
+  /** 次回来店時の予算ボーナス */
+  afterBudgetBonus: 0.5,
+  /** アフター後は来店しやすくなる: 太客の来店確率の下限と、選ばれやすさの倍率 */
+  afterVisitChance: 0.6,
+  afterVisitWeight: 3,
+
+  // 同伴: 好感度が一定以上の太客から届く
+  dohanMinAffinity: 50,
+  dohanChanceBase: 0.2,
+  dohanChancePerAffinity: 0.005,
+  dohanStamina: 10,
+  dohanBudgetBonus: 0.3,
+  /** 同伴料 = base × 店舗倍率 */
+  dohanFeeBase: 10_000,
+} as const;
+
 const FIRST_NAMES = ["アリア", "ベル", "セレナ", "ミラ", "ルナ", "ノエル", "リリィ", "エマ", "ソフィ", "クロエ", "ユリア", "ニナ"];
 
 /** 太客の名前を作る。例: 「令嬢セレナ」 */

@@ -1091,3 +1091,84 @@ button {
 .zcard-regulars {
   color: #ff8fb3;
 }
+
+/* ---------- 同伴・アフター ---------- */
+
+.invite-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.invite-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(255, 143, 179, 0.06);
+  border: 1px solid rgba(255, 143, 179, 0.4);
+  border-radius: 6px;
+}
+.invite-card.declined {
+  opacity: 0.5;
+  background: transparent;
+  border-color: var(--panel-border);
+}
+.invite-card.accepted,
+.invite-card.used {
+  border-color: #7bd88f;
+  background: rgba(123, 216, 143, 0.08);
+}
+.invite-info {
+  min-width: 0;
+}
+.invite-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ff8fb3;
+}
+.invite-effect {
+  font-size: 11px;
+  color: var(--sub);
+  margin-top: 2px;
+  line-height: 1.5;
+}
+.invite-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.invite-status {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.invite-card.accepted .invite-status,
+.invite-card.used .invite-status {
+  color: #7bd88f;
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--sub);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.btn-ghost:hover {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+.closing-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+.closing-actions .btn-big {
+  margin-top: 0;
+}
+.office-shortcuts.warn {
+  color: #ff6b6b;
+}

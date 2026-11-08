@@ -26,6 +26,19 @@ export class DayLedger {
   nominationsServed = 0;
   /** 予算を使い切って帰った客 */
   budgetOuts = 0;
+  /** 同伴の数と同伴料の合計（同伴料は sales にも含む） */
+  dohans = 0;
+  dohanFees = 0;
+  /** 指名ホストの接客を受けて、怒らずに帰った太客（アフターの誘いの対象） */
+  nominatedRegularIds: number[] = [];
+
+  /** 同伴料を売上に計上する。担当ホストの歩合の対象になる */
+  recordDohanFee(fee: number, hostId: string): void {
+    this.sales += fee;
+    this.dohanFees += fee;
+    this.dohans += 1;
+    this.salesByHost[hostId] = (this.salesByHost[hostId] ?? 0) + fee;
+  }
 
   recordSale(amount: number, product: Product, hostId: string | null, byPlayer: boolean): void {
     this.sales += amount;
@@ -71,6 +84,8 @@ export interface DayReport {
   lostRegulars: string[];
   nominationsServed: number;
   budgetOuts: number;
+  dohans: number;
+  dohanFees: number;
 }
 
 /**
@@ -126,5 +141,7 @@ export function settleDay(state: GameState, ledger: DayLedger, onFloorIds: reado
     lostRegulars: [...ledger.lostRegulars],
     nominationsServed: ledger.nominationsServed,
     budgetOuts: ledger.budgetOuts,
+    dohans: ledger.dohans,
+    dohanFees: ledger.dohanFees,
   };
 }

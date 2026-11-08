@@ -8,6 +8,7 @@ import {
   CUSTOMER_TYPE_DEFS,
   CUSTOMER_TYPES,
   type CustomerType,
+  INVITE,
   REGULAR,
   TIME_BANDS,
   timeBandOf,
@@ -20,6 +21,7 @@ import { Customer } from "./entities/customer";
 import { Host } from "./entities/host";
 import { Staff, staffCarryFor, staffSpeedFor, type StaffWorld } from "./entities/staff";
 import { Table } from "./entities/table";
+import { dohanFee } from "./invitations";
 import { CELLAR_POS, ENTRANCE, HOST_STANDBY, TABLE_SLOTS, WALL_BOTTOM } from "./layout";
 import { DayLedger } from "./ledger";
 import { Player } from "./player";
@@ -76,8 +78,48 @@ export class World implements StaffWorld {
     this.ledger = new DayLedger();
     this.visitedRegulars.clear();
     this.spawnT = 2;
+    this.clockMin = 0;
     this.cellar.stock = this.cellar.capacity(this.state.cellarLevel);
     this.lastSale = null;
+    this.spawnDohans();
+  }
+
+  /** 開店と同時に、同伴の客がホストと一緒に来店する */
+  private spawnDohans(): void {
+    const s = this.state;
+    const maxGrade = maxGradeForCellar(s.cellarLevel);
+    const free = this.tables.filter((t) => t.isFree);
+    let delay = 0;
+    for (const inv of s.dohanOffers) {
+      if (inv.status !== "accepted") continue;
+      inv.status = "used";
+      const regular = s.regulars.find((r) => r.id === inv.regularId);
+      const host = this.hosts.find((h) => h.def.id === inv.hostId);
+      const table = free.shift();
+      if (!regular || !host || !table) continue;
+
+      const order = rollOrder(maxGrade, false);
+      const budget = Math.round(
+        Math.max(order.price, this.rollBudget(regular.type, false, regular, maxGrade)) * (1 + INVITE.dohanBudgetBonus),
+      );
+      regular.afterBoost = false;
+      const x = ENTRANCE.x + delay;
+      const c = new Customer(x, ENTRANCE.y, table, order, { type: regular.type, vip: false, budget, regular, dohan: true }, maxGrade, ENTRANCE.x, ENTRANCE.y);
+      table.customer = c;
+      this.customers.push(c);
+      host.x = x + 10;
+      host.y = ENTRANCE.y;
+      host.assign(table);
+      delay += 14;
+
+      const fee = dohanFee(s.shopLevel);
+      s.earn(fee);
+      this.ledger.customers += 1;
+      this.ledger.regularVisits += 1;
+      this.ledger.recordDohanFee(fee, host.def.id);
+      this.visitedRegulars.add(regular.id);
+      this.floats.add(ENTRANCE.x + 40, ENTRANCE.y - 30 - delay, `${regular.name} と同伴! +${formatG(fee)}`, UI_TEXT.pink);
+    }
   }
 
   /** 閉店。席にいる客を全員帰らせる */
@@ -322,6 +364,7 @@ export class World implements StaffWorld {
       const r = c.regular;
       r.visits += 1;
       if (c.nominatedServed) this.ledger.nominationsServed += 1;
+      if (c.nominatedServed && !c.angry) this.ledger.nominatedRegularIds.push(r.id);
       let delta = 0;
       if (c.angry) delta -= REGULAR.affinityLossAngry;
       else if (c.nominatedServed) delta += REGULAR.affinityGainVisit;
@@ -364,7 +407,8 @@ export class World implements StaffWorld {
     const drinks = lo + Math.random() * (hi - lo);
     const band = TIME_BANDS[timeBandOf(this.clockMin)];
     const aff = regular ? 1 + (regular.affinity / 100) * REGULAR.budgetPerAffinity : 1;
-    return Math.round(avg * drinks * band.budgetFactor * (vip ? CUSTOMER.vipMultiplier : 1) * aff);
+    const after = regular?.afterBoost ? 1 + INVITE.afterBudgetBonus : 1;
+    return Math.round(avg * drinks * band.budgetFactor * (vip ? CUSTOMER.vipMultiplier : 1) * aff * after);
   }
 
   private pickType(): CustomerType {
@@ -384,12 +428,15 @@ export class World implements StaffWorld {
   private pickRegular(): Regular | null {
     const candidates = this.state.regulars.filter((r) => !this.visitedRegulars.has(r.id));
     if (candidates.length === 0) return null;
-    const chance = Math.min(REGULAR.visitChanceCap, candidates.length * REGULAR.visitChancePerRegular);
+    let chance = Math.min(REGULAR.visitChanceCap, candidates.length * REGULAR.visitChancePerRegular);
+    if (candidates.some((r) => r.afterBoost)) chance = Math.max(chance, INVITE.afterVisitChance);
     if (Math.random() >= chance) return null;
-    const total = candidates.reduce((a, r) => a + r.affinity, 0);
+    // アフターの翌回は選ばれやすい
+    const weightOf = (r: Regular) => r.affinity * (r.afterBoost ? INVITE.afterVisitWeight : 1);
+    const total = candidates.reduce((a, r) => a + weightOf(r), 0);
     let x = Math.random() * total;
     for (const r of candidates) {
-      x -= r.affinity;
+      x -= weightOf(r);
       if (x < 0) return r;
     }
     return candidates[0] ?? null;
@@ -406,6 +453,7 @@ export class World implements StaffWorld {
     const maxGrade = maxGradeForCellar(this.state.cellarLevel);
     const order = rollOrder(maxGrade, vip);
     const budget = Math.max(order.price * (vip ? CUSTOMER.vipMultiplier : 1), this.rollBudget(type, vip, regular, maxGrade));
+    if (regular) regular.afterBoost = false;
     const c = new Customer(ENTRANCE.x, ENTRANCE.y, table, order, { type, vip, budget, regular }, maxGrade, ENTRANCE.x, ENTRANCE.y);
     table.customer = c;
     this.customers.push(c);

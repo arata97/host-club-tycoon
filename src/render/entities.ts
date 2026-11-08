@@ -128,7 +128,7 @@ export function drawCustomer(ctx: CanvasRenderingContext2D, c: Customer): void {
 
   // 足元: 太客は名前（ピンク）、一見客はタイプ
   if (c.phase !== "leaving") {
-    if (c.regular) drawNameTag(ctx, c.x, c.y, `♥${c.regular.name}`, UI_TEXT.pink);
+    if (c.regular) drawNameTag(ctx, c.x, c.y, `${c.dohan ? "同伴" : ""}♥${c.regular.name}`, UI_TEXT.pink);
     else drawNameTag(ctx, c.x, c.y, CUSTOMER_TYPE_DEFS[c.type].short, "rgba(220,210,240,0.7)");
   }
 }

@@ -1,13 +1,15 @@
-import { ASSIGN_POLICIES, STAMINA } from "../game/data/customers";
+import { ASSIGN_POLICIES, INVITE, STAMINA } from "../game/data/customers";
 import { hostGuaranteeFor, HOST_WAGE, LOAN, rentDiscount, rentFor } from "../game/data/economy";
 import { RACES } from "../game/data/races";
+import { pendingCount } from "../game/invitations";
 import type { GameState } from "../game/state";
 import { formatG } from "../game/util";
+import { renderInviteCard } from "./invite";
 import { BasePanel, buildPanelHead } from "./panel";
 import { createPortrait } from "./portrait";
 import { renderReport } from "./report";
 
-type Tab = "report" | "roster" | "finance";
+type Tab = "report" | "dohan" | "roster" | "finance";
 
 /**
  * 経営画面（開店前）。日報の確認、借入・返済、開店ボタン。
@@ -18,6 +20,7 @@ export class OfficeUI extends BasePanel {
   private readonly tabsEl: HTMLElement;
   private readonly bodyEl: HTMLElement;
   private readonly openBtn: HTMLButtonElement;
+  private readonly footNoteEl: HTMLElement;
   private tab: Tab = "report";
   private lastSig = "";
 
@@ -38,6 +41,7 @@ export class OfficeUI extends BasePanel {
     this.tabsEl.className = "tabs";
     for (const [key, label] of [
       ["report", "日報"],
+      ["dohan", "同伴"],
       ["roster", "出勤・方針"],
       ["finance", "財務"],
     ] as const) {
@@ -61,6 +65,7 @@ export class OfficeUI extends BasePanel {
     const shortcuts = document.createElement("span");
     shortcuts.className = "office-shortcuts";
     shortcuts.textContent = "B ショップ ／ G ガチャ ／ Z 図鑑";
+    this.footNoteEl = shortcuts;
     this.openBtn = document.createElement("button");
     this.openBtn.type = "button";
     this.openBtn.className = "btn-pink btn-big";
@@ -72,9 +77,16 @@ export class OfficeUI extends BasePanel {
     this.refresh(true);
   }
 
+  /** 未回答の同伴があれば、開いたときに同伴タブを見せる */
+  override openPanel(): void {
+    if (pendingCount(this.state.dohanOffers) > 0) this.tab = "dohan";
+    super.openPanel();
+  }
+
   refresh(force = false): void {
     const s = this.state;
-    const sig = `${this.tab}|${Math.floor(s.money)}|${s.debt}|${s.day}|${s.negativeDays}|${s.lastReport?.day ?? 0}|${s.policy}|${s.rosterMode}|${s.manualRoster.join(",")}|${Object.keys(s.hosts).length}|${s.tableCount}|${s.regulars.length}`;
+    const dohanSig = s.dohanOffers.map((o) => `${o.id}:${o.status}`).join(",");
+    const sig = `${this.tab}|${Math.floor(s.money)}|${s.debt}|${s.day}|${s.negativeDays}|${s.lastReport?.day ?? 0}|${s.policy}|${s.rosterMode}|${s.manualRoster.join(",")}|${Object.keys(s.hosts).length}|${s.tableCount}|${s.regulars.length}|${dohanSig}`;
     if (!force && sig === this.lastSig) return;
     this.lastSig = sig;
 
@@ -97,12 +109,45 @@ export class OfficeUI extends BasePanel {
       this.summaryEl.appendChild(warn);
     }
 
-    for (const b of this.tabsEl.querySelectorAll<HTMLButtonElement>(".tab")) b.classList.toggle("active", b.dataset.tab === this.tab);
+    const pending = pendingCount(s.dohanOffers);
+    for (const b of this.tabsEl.querySelectorAll<HTMLButtonElement>(".tab")) {
+      b.classList.toggle("active", b.dataset.tab === this.tab);
+      if (b.dataset.tab === "dohan") b.textContent = pending > 0 ? `同伴（${pending}）` : "同伴";
+    }
+    this.footNoteEl.textContent =
+      pending > 0 ? `未回答の同伴 ${pending} 件は、開店すると断ったことになります` : "B ショップ ／ G ガチャ ／ Z 図鑑";
+    this.footNoteEl.classList.toggle("warn", pending > 0);
 
     this.bodyEl.innerHTML = "";
     if (this.tab === "report") this.renderReportTab();
+    else if (this.tab === "dohan") this.renderDohanTab();
     else if (this.tab === "roster") this.renderRosterTab();
     else this.renderFinanceTab();
+  }
+
+  private renderDohanTab(): void {
+    const s = this.state;
+    const wrap = document.createElement("div");
+    wrap.className = "invite-section";
+    if (s.dohanOffers.length === 0) {
+      const none = document.createElement("div");
+      none.className = "office-empty";
+      none.innerHTML = `今日の同伴の誘いはありません。<br>好感度 ${INVITE.dohanMinAffinity} 以上の太客から、閉店後に誘いが届きます。`;
+      wrap.appendChild(none);
+    }
+    const note = document.createElement("div");
+    note.className = "finance-note";
+    note.textContent = `受けられるのは1ホスト1件、合計で卓数（${s.tableCount}件）までです。同伴を受けたホストは出勤が確定します。`;
+    if (s.dohanOffers.length > 0) wrap.appendChild(note);
+    for (const inv of s.dohanOffers) {
+      wrap.appendChild(
+        renderInviteCard(s, inv, () => {
+          this.onChange();
+          this.refresh(true);
+        }),
+      );
+    }
+    this.bodyEl.appendChild(wrap);
   }
 
   private renderRosterTab(): void {
@@ -180,7 +225,7 @@ export class OfficeUI extends BasePanel {
 
       const check = document.createElement("span");
       check.className = "roster-check";
-      check.textContent = on ? "✔ 出勤" : "控え";
+      check.textContent = s.pinnedHostIds().has(d.id) ? "✔ 同伴" : on ? "✔ 出勤" : "控え";
       const info = document.createElement("span");
       info.className = "roster-info";
       info.innerHTML = `<b>${d.name}</b> <small>${d.rarity}・${d.race}${s.limitBreak(d.id) ? ` +${s.limitBreak(d.id)}` : ""}</small><br>

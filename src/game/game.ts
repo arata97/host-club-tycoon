@@ -11,6 +11,7 @@ import { ShopUI } from "../ui/shop";
 import { ZukanUI } from "../ui/zukan";
 import { SAVE } from "./data/balance";
 import { DAY, formatClock, LOAN } from "./data/economy";
+import { applyDohanStamina, declineAllPending, generateAfterOffers, generateDohanOffers } from "./invitations";
 import { settleDay } from "./ledger";
 import { Player } from "./player";
 import { clearSave, GameState, loadSave, writeSave } from "./state";
@@ -118,8 +119,11 @@ export class Game implements Loopable {
   openDay(): void {
     if (this.state.phase !== "preopen") return;
     this.closeAllPanels();
+    // 回答しなかった同伴は断ったことになる
+    declineAllPending(this.state, this.state.dohanOffers);
     this.world.syncWithState();
     this.state.recoverStaminaForDay(new Set(this.world.hosts.map((h) => h.def.id)));
+    applyDohanStamina(this.state);
     this.state.phase = "open";
     this.state.clockMin = 0;
     this.closingStarted = false;
@@ -158,6 +162,7 @@ export class Game implements Loopable {
       this.state.phase = "bankrupt";
       this.closing.showBankrupt();
     } else {
+      this.state.afterOffers = generateAfterOffers(this.state, this.world.ledger.nominatedRegularIds);
       this.closing.showReport(report);
     }
     this.save();
@@ -165,7 +170,11 @@ export class Game implements Loopable {
 
   nextDay(): void {
     if (this.state.phase !== "closing") return;
+    this.state.afterOffers = [];
     this.state.day += 1;
+    // アフターの結果（好感度）を反映してから、翌日の同伴の誘いを作る
+    this.state.dohanOffers = generateDohanOffers(this.state);
+    this.world.syncWithState();
     this.state.phase = "preopen";
     this.state.clockMin = 0;
     this.closing.hide();
