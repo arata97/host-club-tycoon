@@ -313,7 +313,6 @@ export class GameState {
       pity: this.pity,
       totalPulls: this.totalPulls,
       rebirths: this.rebirths + 1,
-      totalRevenue: this.totalRevenue,
       policy: this.policy,
     };
     Object.assign(this, new GameState());
@@ -322,7 +321,6 @@ export class GameState {
     this.pity = keep.pity;
     this.totalPulls = keep.totalPulls;
     this.rebirths = keep.rebirths;
-    this.totalRevenue = keep.totalRevenue;
     this.policy = keep.policy;
     this.money = startingCash(this.rebirths);
   }

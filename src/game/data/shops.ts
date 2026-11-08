@@ -50,6 +50,8 @@ export interface ShopDef {
   moveCost: number;
   /** 席の上限 */
   seats: Record<SeatGrade, number>;
+  /** 酒蔵Lvの上限。提供できる酒のグレードを店舗で抑える */
+  cellarMax: number;
   /** この店舗で増える要素の説明 */
   feature: string;
 }
@@ -62,42 +64,47 @@ export const SHOPS: readonly ShopDef[] = [
     needsFullCollection: false,
     moveCost: 0,
     seats: { general: 5, vip: 0, exe: 0, god: 0 },
+    cellarMax: 3,
     feature: "最初の店",
   },
   {
     level: 2,
     name: "街のホストクラブ",
-    unlockRevenue: 500_000,
+    unlockRevenue: 1_500_000,
     needsFullCollection: false,
-    moveCost: 300_000,
+    moveCost: 500_000,
     seats: { general: 6, vip: 2, exe: 0, god: 0 },
+    cellarMax: 5,
     feature: "VIP席／会計が必要になり、レジで内勤に任せられる／SR がガチャに登場",
   },
   {
     level: 3,
     name: "貴族街の高級店",
-    unlockRevenue: 5_000_000,
+    unlockRevenue: 30_000_000,
     needsFullCollection: false,
-    moveCost: 3_000_000,
+    moveCost: 5_000_000,
     seats: { general: 8, vip: 2, exe: 1, god: 0 },
-    feature: "EXE VIP席／シャンパンコール／グレード4の酒／SSR がガチャに登場",
+    cellarMax: 7,
+    feature: "EXE VIP席／シャンパンコール／酒蔵Lv7（グレード3の酒）／SSR がガチャに登場",
   },
   {
     level: 4,
     name: "王都一番店",
-    unlockRevenue: 50_000_000,
+    unlockRevenue: 400_000_000,
     needsFullCollection: false,
-    moveCost: 30_000_000,
+    moveCost: 100_000_000,
     seats: { general: 10, vip: 3, exe: 1, god: 0 },
-    feature: "月間No.1発表／席の上限が増える",
+    cellarMax: 9,
+    feature: "月間No.1発表／席の上限が増える／酒蔵Lv9（グレード4の酒）",
   },
   {
     level: 5,
     name: "魔王城ラウンジ",
-    unlockRevenue: 500_000_000,
+    unlockRevenue: 20_000_000_000,
     needsFullCollection: false,
-    moveCost: 300_000_000,
+    moveCost: 2_000_000_000,
     seats: { general: 10, vip: 3, exe: 2, god: 1 },
+    cellarMax: 11,
     feature: "神座／送迎馬車／神の排出率が適正に",
   },
   {
@@ -105,8 +112,9 @@ export const SHOPS: readonly ShopDef[] = [
     name: "天界クラブ",
     unlockRevenue: 0,
     needsFullCollection: true,
-    moveCost: 1_000_000_000,
+    moveCost: 10_000_000_000,
     seats: { general: 10, vip: 3, exe: 2, god: 1 },
+    cellarMax: 11,
     feature: "図鑑を完成させた者だけが開ける最後の店",
   },
 ];
@@ -164,6 +172,8 @@ export function upgradeCap(key: UpgradeKey, shopLevel: number): number {
       return seats.exe;
     case "throne":
       return seats.god;
+    case "cellar":
+      return shopDef(shopLevel).cellarMax - 1;
     case "register":
       return shopLevel >= CHECKOUT.fromShop ? UPGRADES.register.max : 0;
     case "carriage":

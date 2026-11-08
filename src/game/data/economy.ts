@@ -22,7 +22,7 @@ export const EXPENSES = {
   /** 原価率（提供したボトルの売価に対して） */
   cogsRate: 0.3,
   /** 店舗レベル別の家賃（日額） */
-  rentByShop: [0, 20_000, 100_000, 500_000, 2_500_000, 10_000_000, 30_000_000] as readonly number[],
+  rentByShop: [0, 20_000, 120_000, 500_000, 5_000_000, 40_000_000, 150_000_000] as readonly number[],
   /** 内勤の日給（教育Lvごとに +5%） */
   staffWageBase: 8_000,
   staffWagePerLevel: 0.05,
@@ -32,7 +32,7 @@ export const EXPENSES = {
 export const HOST_WAGE = {
   rate: { N: 0.4, R: 0.45, SR: 0.5, SSR: 0.55, UR: 0.6 } as Record<Rarity, number>,
   guaranteeBase: { N: 5_000, R: 10_000, SR: 30_000, SSR: 100_000, UR: 300_000 } as Record<Rarity, number>,
-  guaranteeScaleByShop: [0, 1, 3, 10, 30, 100, 300] as readonly number[],
+  guaranteeScaleByShop: [0, 1, 1.5, 3, 10, 30, 100] as readonly number[],
 } as const;
 
 export function rentFor(shopLevel: number): number {

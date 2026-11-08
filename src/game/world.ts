@@ -81,7 +81,7 @@ export class World implements StaffWorld {
     return this.customers.length === 0;
   }
   private get maxGrade() {
-    return maxGradeFor(this.state.cellarLevel, this.state.shopLevel);
+    return maxGradeFor(this.state.cellarLevel);
   }
 
   /** 開店 */

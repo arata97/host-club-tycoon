@@ -50,8 +50,8 @@ const SECTIONS: Section[] = [
         label: "酒蔵アップグレード",
         effect: (s) => {
           const next = s.cellarLevel + 1;
-          const g = maxGradeFor(s.cellarLevel, s.shopLevel);
-          const ng = maxGradeFor(next, s.shopLevel);
+          const g = maxGradeFor(s.cellarLevel);
+          const ng = maxGradeFor(next);
           return `Lv${s.cellarLevel} → Lv${next}（在庫・補充速度UP${ng > g ? `、グレード${ng}の酒を解放!` : ""}）`;
         },
       },

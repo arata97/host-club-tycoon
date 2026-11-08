@@ -13,19 +13,19 @@ export interface UpgradeDef {
 
 export const UPGRADES = {
   /** 一般席の増設（初期1卓）。実際の上限は店舗で決まる（upgradeCap） */
-  table: { base: 5_000, growth: 1.8, max: 9 } satisfies UpgradeDef,
+  table: { base: 5_000, growth: 2.2, max: 9 } satisfies UpgradeDef,
   /** VIP席（店舗2〜） */
-  vip: { base: 300_000, growth: 2.5, max: 3 } satisfies UpgradeDef,
+  vip: { base: 1_000_000, growth: 2.5, max: 3 } satisfies UpgradeDef,
   /** EXE VIP席（店舗3〜） */
-  exe: { base: 5_000_000, growth: 3, max: 2 } satisfies UpgradeDef,
+  exe: { base: 30_000_000, growth: 5, max: 2 } satisfies UpgradeDef,
   /** 神座（店舗5〜） */
-  throne: { base: 500_000_000, growth: 1, max: 1 } satisfies UpgradeDef,
+  throne: { base: 5_000_000_000, growth: 1, max: 1 } satisfies UpgradeDef,
   /** レジ（店舗2〜）: 内勤が会計を代行する */
   register: { base: 150_000, growth: 1, max: 1 } satisfies UpgradeDef,
   /** 送迎馬車（店舗5〜）: 来店間隔を短縮 */
-  carriage: { base: 100_000_000, growth: 2, max: 3 } satisfies UpgradeDef,
+  carriage: { base: 1_000_000_000, growth: 2, max: 3 } satisfies UpgradeDef,
   /** 酒蔵Lv（初期Lv1）。Lv3でグレード2、Lv6でグレード3が解放 */
-  cellar: { base: 8_000, growth: 2.0, max: 10 } satisfies UpgradeDef,
+  cellar: { base: 8_000, growth: 2.6, max: 10 } satisfies UpgradeDef,
   /** 主人公の移動速度 +10%/Lv */
   speed: { base: 3_000, growth: 1.7, max: 10 } satisfies UpgradeDef,
   /** 主人公の運搬数 +1/Lv（初期2） */

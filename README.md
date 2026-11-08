@@ -61,6 +61,7 @@ src/
     palette.ts          配色
     fx.ts               浮かび上がるテキスト
   ui/                   HTML パネル（ショップ／ガチャ／図鑑）
+  dev/autoplay.ts       バランス調整用の自動プレイ（開発専用）
 src-tauri/              Tauri（Rust）側。ウィンドウ設定・権限・バンドル設定
 .github/workflows/      CI（型チェック・Web ビルド・macOS/Windows の Tauri ビルド）
 ```

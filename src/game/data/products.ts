@@ -56,9 +56,10 @@ export const PRODUCTS: readonly Product[] = [
   { name: "世界樹のシャンパンタワー", grade: 4, price: 10_000_000, exeOnly: true, call: true },
 ];
 
-/** 酒蔵Lvと店舗で提供できる上限グレード。グレード4は店舗3以降（酒蔵Lv6 が必要） */
-export function maxGradeFor(level: number, shopLevel: number): Grade {
-  if (level >= 6) return shopLevel >= 3 ? 4 : 3;
+/** 酒蔵Lvで提供できる上限グレード。酒蔵Lvの上限は店舗で決まる（ShopDef.cellarMax） */
+export function maxGradeFor(level: number): Grade {
+  if (level >= 9) return 4;
+  if (level >= 6) return 3;
   if (level >= 3) return 2;
   return 1;
 }
