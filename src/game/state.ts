@@ -587,12 +587,11 @@ function clampInt(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-// --- 永続化（localStorage。Tauri fs への切替はフェーズ4） ---
+// --- 永続化（localStorage。Tauri でも WebView のデータ領域に残る） ---
 
-export function loadSave(): (Partial<SaveData> & { v: number }) | null {
+function parseSave(raw: string | null): (Partial<SaveData> & { v: number }) | null {
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(SAVE.key);
-    if (!raw) return null;
     const data = JSON.parse(raw) as Partial<SaveData>;
     if (typeof data !== "object" || data === null || typeof data.v !== "number") return null;
     if (data.v < 2 || data.v > SAVE.version) return null;
@@ -602,8 +601,20 @@ export function loadSave(): (Partial<SaveData> & { v: number }) | null {
   }
 }
 
+/** セーブを読む。壊れていたら直前のバックアップから復旧する */
+export function loadSave(): (Partial<SaveData> & { v: number }) | null {
+  try {
+    return parseSave(localStorage.getItem(SAVE.key)) ?? parseSave(localStorage.getItem(SAVE.backupKey));
+  } catch {
+    return null;
+  }
+}
+
 export function writeSave(data: SaveData): boolean {
   try {
+    // 読めるセーブだけをバックアップに回す（壊れたデータで上書きしない）
+    const current = localStorage.getItem(SAVE.key);
+    if (current && parseSave(current)) localStorage.setItem(SAVE.backupKey, current);
     localStorage.setItem(SAVE.key, JSON.stringify(data));
     return true;
   } catch {
@@ -614,6 +625,7 @@ export function writeSave(data: SaveData): boolean {
 export function clearSave(): void {
   try {
     localStorage.removeItem(SAVE.key);
+    localStorage.removeItem(SAVE.backupKey);
   } catch {
     /* noop */
   }

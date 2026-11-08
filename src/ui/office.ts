@@ -1,3 +1,4 @@
+import { sfx } from "../engine/audio";
 import { ASSIGN_POLICIES, INVITE, STAMINA } from "../game/data/customers";
 import { hostGuaranteeFor, HOST_WAGE, LOAN, rentDiscount, rentFor } from "../game/data/economy";
 import { RACES } from "../game/data/races";
@@ -218,7 +219,10 @@ export class OfficeUI extends BasePanel {
         return;
       }
       this.confirmMove = false;
-      if (s.relocate(true)) this.onChange();
+      if (s.relocate(true)) {
+        sfx.play("move");
+        this.onChange();
+      }
       this.refresh(true);
     });
     box.appendChild(btn);

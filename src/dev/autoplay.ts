@@ -141,7 +141,8 @@ function ownedByRarity(s: GameState): Partial<Record<Rarity, number>> {
 export async function runAutoplay(game: Game, opts: AutoplayOptions): Promise<AutoplayResult> {
   const dt = opts.dt ?? 1 / 20;
   const s = game.state;
-  const g = game as unknown as { input: { axis: () => Vec } };
+  const g = game as unknown as { input: { axis: () => Vec }; leaveTitle: () => void };
+  g.leaveTitle();
   const originalAxis = g.input.axis.bind(g.input);
   g.input.axis = () => steer(game.world);
 

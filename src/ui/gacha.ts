@@ -1,3 +1,4 @@
+import { sfx } from "../engine/audio";
 import { gachaPrice, gachaRates, pityRarity, RARITIES, type Rarity } from "../game/data/balance";
 import { RACES } from "../game/data/races";
 import { hostEffect } from "../game/entities/host";
@@ -103,6 +104,7 @@ export class GachaUI extends BasePanel {
 
     // 最高レアの演出
     const best = results.reduce((a, b) => (RARITIES.indexOf(b.def.rarity) > RARITIES.indexOf(a.def.rarity) ? b : a));
+    sfx.play(best.def.rarity === "UR" ? "god" : best.def.rarity === "SSR" || best.def.rarity === "SR" ? "rare" : "gacha");
     this.root.classList.remove("flash-SSR", "flash-UR");
     if (best.def.rarity === "SSR" || best.def.rarity === "UR") {
       void this.root.offsetWidth; // アニメーション再始動

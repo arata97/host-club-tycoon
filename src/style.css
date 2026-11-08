@@ -1224,3 +1224,46 @@ button {
 .office-shortcuts.warn {
   color: #ff6b6b;
 }
+
+/* タイトル */
+#title.overlay {
+  background: radial-gradient(ellipse at center, rgba(40, 14, 44, 0.86), rgba(8, 5, 14, 0.97));
+  z-index: 50;
+}
+.title-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+.title-logo {
+  margin: 0;
+  font-size: 54px;
+  line-height: 1.2;
+  letter-spacing: 2px;
+  color: var(--gold);
+  text-shadow:
+    0 0 18px rgba(255, 143, 179, 0.8),
+    0 3px 0 #7a1f3a;
+}
+.title-sub {
+  margin: 0;
+  color: var(--sub);
+  font-size: 14px;
+}
+.title-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 260px;
+  margin-top: 12px;
+}
+.title-help {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.hud-btn.mute {
+  min-width: 34px;
+}

@@ -116,7 +116,7 @@ export class ClosingUI {
         <li>${next}周目ボーナス: 開始資金 ${formatG(startingCash(next))}、家賃 −${Math.round(rentDiscount(next) * 100)}%</li>
       </ul></div>
       <div class="rebirth-col"><b>失うもの</b><ul>
-        <li>現金・借金</li>
+        <li>現金・借金・累計売上</li>
         <li>店舗・テーブル・酒蔵・内勤</li>
         <li>店長の強化・太客</li>
       </ul></div>`;

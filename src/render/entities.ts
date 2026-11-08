@@ -43,7 +43,13 @@ export function drawStaff(ctx: CanvasRenderingContext2D, s: Staff): void {
   drawNameTag(ctx, s.x, s.y, s.name, "rgba(200,200,220,0.75)");
 }
 
-export function drawHost(ctx: CanvasRenderingContext2D, h: Host): void {
+/** 足元の影 */
+export function drawShadow(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.fillRect(Math.round(x) - 5, Math.round(y) + 8, 10, 2);
+}
+
+export function drawHost(ctx: CanvasRenderingContext2D, h: Host, dancing = false): void {
   const px = Math.round(h.x);
   const py = Math.round(h.y);
   const rarity = h.def.rarity;
@@ -56,7 +62,10 @@ export function drawHost(ctx: CanvasRenderingContext2D, h: Host): void {
     ctx.fillRect(px + 6, py - 19, 2, 12);
   }
 
-  drawCreature(ctx, h.x, h.y, h.def.palette, h.walkT, h.facing, RACE_FEATURE[h.def.race]);
+  const dance = dancing && h.phase === "serving";
+  const hop = dance ? Math.abs(Math.sin(h.animT * 8)) * 3 : 0;
+  const facing = dance ? (Math.sin(h.animT * 4) > 0 ? 1 : -1) : h.facing;
+  drawCreature(ctx, h.x, h.y - hop, h.def.palette, dance ? h.animT : h.walkT, facing, RACE_FEATURE[h.def.race]);
 
   if (h.phase === "serving") {
     const bob = Math.round(Math.sin(h.animT * 4) * 2);

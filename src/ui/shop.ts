@@ -1,3 +1,4 @@
+import { sfx } from "../engine/audio";
 import { UPGRADES, type UpgradeKey } from "../game/data/balance";
 import { maxGradeFor } from "../game/data/products";
 import { CARRIAGE, CHECKOUT, GOD_THRONE_BONUS, SEATS, type SeatGrade } from "../game/data/shops";
@@ -183,6 +184,7 @@ export class ShopUI extends BasePanel {
     btn.appendChild(cost);
     btn.addEventListener("click", () => {
       if (this.state.buy(row.key)) {
+        sfx.play("buy");
         this.onPurchase();
         this.refresh(true);
       }

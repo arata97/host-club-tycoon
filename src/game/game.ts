@@ -1,3 +1,4 @@
+import { sfx } from "../engine/audio";
 import type { PixelCanvas } from "../engine/canvas";
 import type { Input } from "../engine/input";
 import type { Loopable } from "../engine/loop";
@@ -8,6 +9,7 @@ import { GachaUI } from "../ui/gacha";
 import { OfficeUI } from "../ui/office";
 import type { Panel } from "../ui/panel";
 import { ShopUI } from "../ui/shop";
+import { TitleUI } from "../ui/title";
 import { ZukanUI } from "../ui/zukan";
 import { SAVE } from "./data/balance";
 import { DAY, formatClock, LOAN } from "./data/economy";
@@ -30,6 +32,25 @@ const PANEL_KEYS: Record<string, PanelName> = {
 /** 開店前にしか開けないパネル（ショップは営業中も使える） */
 const PREOPEN_ONLY: ReadonlySet<PanelName> = new Set<PanelName>(["office", "gacha"]);
 
+/** 「はじめから」で再読み込みするときは、タイトルをもう一度出さない */
+const SKIP_TITLE_KEY = "hct-skip-title";
+function requestSkipTitle(): void {
+  try {
+    sessionStorage.setItem(SKIP_TITLE_KEY, "1");
+  } catch {
+    /* noop */
+  }
+}
+function consumeSkipTitle(): boolean {
+  try {
+    const skip = sessionStorage.getItem(SKIP_TITLE_KEY) === "1";
+    sessionStorage.removeItem(SKIP_TITLE_KEY);
+    return skip;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * ゲーム全体のオーケストレーション: 1日の状態機械・ワールド・UI・セーブ。
  *   preopen（開店前・時間停止） → open（営業 20:00〜24:00） → closing（精算） → preopen（翌日）
@@ -40,6 +61,7 @@ export class Game implements Loopable {
   world: World;
   private readonly panels: Record<PanelName, Panel>;
   private readonly closing: ClosingUI;
+  private readonly title: TitleUI;
   private autosaveT = 0;
   /** 24:00 を過ぎてから客が退店しきるのを待つ時間 */
   private closeGraceT = 0;
@@ -57,6 +79,7 @@ export class Game implements Loopable {
     clock: document.getElementById("hud-clock"),
     clockBar: document.getElementById("hud-clockbar"),
     openBtn: document.getElementById("open-btn"),
+    mute: document.getElementById("mute-toggle"),
     hint: document.getElementById("hint"),
   };
 
@@ -92,8 +115,15 @@ export class Game implements Loopable {
       () => this.reincarnate(),
     );
 
+    this.title = new TitleUI(
+      saved !== null,
+      () => this.leaveTitle(),
+      () => this.resetGame(),
+    );
+
     window.addEventListener("keydown", (e) => {
-      if (e.repeat) return;
+      if (e.repeat || this.title.isOpen) return;
+      if (e.code === "KeyM") this.toggleMute();
       const name = PANEL_KEYS[e.code];
       if (name) this.togglePanel(name);
       if (e.code === "Escape") this.closeAllPanels();
@@ -104,21 +134,38 @@ export class Game implements Loopable {
       document.getElementById(`${name}-toggle`)?.addEventListener("click", () => this.togglePanel(name));
     }
     this.hud.openBtn?.addEventListener("click", () => this.openDay());
+    this.hud.mute?.addEventListener("click", () => this.toggleMute());
+    this.updateMuteButton();
 
     window.addEventListener("beforeunload", () => this.save());
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) this.save();
     });
 
-    // 起動時の状態に応じた画面
+    if (consumeSkipTitle()) this.leaveTitle();
+    else this.title.show();
+  }
+
+  /** タイトルを閉じて、状態に応じた最初の画面を出す */
+  private leaveTitle(): void {
+    this.title.hide();
     if (this.state.phase === "bankrupt") this.closing.showBankrupt();
     else if (this.state.phase === "preopen") this.panels.office.openPanel();
+  }
+
+  private toggleMute(): void {
+    sfx.toggleMute();
+    this.updateMuteButton();
+  }
+
+  private updateMuteButton(): void {
+    if (this.hud.mute) this.hud.mute.textContent = sfx.muted ? "消音中" : "♪";
   }
 
   // ---------- 1日の状態機械 ----------
 
   openDay(): void {
-    if (this.state.phase !== "preopen") return;
+    if (this.state.phase !== "preopen" || this.title.isOpen) return;
     this.closeAllPanels();
     // 回答しなかった同伴は断ったことになる
     declineAllPending(this.state, this.state.dohanOffers);
@@ -130,6 +177,7 @@ export class Game implements Loopable {
     this.closingStarted = false;
     this.closeGraceT = 0;
     this.world.startDay();
+    sfx.play("open");
     this.save();
   }
 
@@ -161,8 +209,10 @@ export class Game implements Loopable {
     this.state.phase = "closing";
     if (this.state.negativeDays >= LOAN.bankruptDays && this.state.money < 0) {
       this.state.phase = "bankrupt";
+      sfx.play("bankrupt");
       this.closing.showBankrupt();
     } else {
+      sfx.play("close");
       this.state.afterOffers = generateAfterOffers(this.state, this.world.ledger.nominatedRegularIds);
       this.closing.showReport(report);
     }
@@ -195,6 +245,7 @@ export class Game implements Loopable {
   // ---------- パネル ----------
 
   togglePanel(name: PanelName): void {
+    if (this.title.isOpen) return;
     const p = this.panels[name];
     if (p.isOpen) {
       p.close();
@@ -233,7 +284,7 @@ export class Game implements Loopable {
 
   update(dt: number): void {
     const s = this.state;
-    const blocked = this.anyPanelOpen || s.phase === "closing" || s.phase === "bankrupt";
+    const blocked = this.title.isOpen || this.anyPanelOpen || s.phase === "closing" || s.phase === "bankrupt";
     const axis = blocked ? { x: 0, y: 0 } : this.input.axis();
 
     switch (s.phase) {
@@ -291,6 +342,7 @@ export class Game implements Loopable {
   resetGame(): void {
     this.suppressSave = true;
     clearSave();
+    requestSkipTitle();
     location.reload();
   }
 

@@ -1,6 +1,7 @@
 import { LOGICAL_H, LOGICAL_W } from "../engine/canvas";
 import type { Vec2 } from "../engine/input";
-import { FloatingTexts } from "../render/fx";
+import { sfx } from "../engine/audio";
+import { FloatingTexts, Particles } from "../render/fx";
 import { UI_TEXT } from "../render/palette";
 import { CELLAR, CUSTOMER, PLAYER, rarityRank } from "./data/balance";
 import {
@@ -55,6 +56,10 @@ export class World implements StaffWorld {
   hosts: Host[] = [];
   customers: Customer[] = [];
   readonly floats = new FloatingTexts();
+  readonly particles = new Particles();
+  /** VIP 来店時に入口を照らす残り時間（秒） */
+  vipSpotT = 0;
+  private confettiT = 0;
   ledger = new DayLedger();
   lastSale: { text: string; t: number } | null = null;
   /** 今日すでに来店した太客 */
@@ -198,6 +203,7 @@ export class World implements StaffWorld {
 
   onServed(table: Table): void {
     this.floats.add(table.x, table.y - 24, "提供!", UI_TEXT.info);
+    sfx.play("serve");
     const c = table.customer;
     if (c?.order.call) this.tryChampagneCall(c.host?.name ?? null);
   }
@@ -207,11 +213,17 @@ export class World implements StaffWorld {
     if (this.state.shopLevel < CHAMPAGNE.fromShop || this.champagneT > 0 || this.champagneCooldownT > 0) return;
     this.champagneT = CHAMPAGNE.durationMin;
     this.ledger.champagneCalls += 1;
+    sfx.play("call");
     this.floats.add(LOGICAL_W / 2 - 40, 60, `${hostName ? `${hostName} の` : ""}シャンパンコール!`, UI_TEXT.vipGold);
   }
 
   private updateChampagne(dt: number): void {
     if (this.champagneT > 0) {
+      this.confettiT -= dt;
+      if (this.confettiT <= 0) {
+        this.confettiT = 0.08;
+        this.particles.confetti(LOGICAL_W);
+      }
       this.champagneT = Math.max(0, this.champagneT - dt);
       if (this.champagneT === 0) this.champagneCooldownT = CHAMPAGNE.cooldownMin;
     } else if (this.champagneCooldownT > 0) {
@@ -361,6 +373,8 @@ export class World implements StaffWorld {
     this.updateCustomers(dt);
 
     this.floats.update(dt);
+    this.particles.update(dt);
+    if (this.vipSpotT > 0) this.vipSpotT -= dt;
     if (this.lastSale) {
       this.lastSale.t -= dt;
       if (this.lastSale.t <= 0) this.lastSale = null;
@@ -378,6 +392,7 @@ export class World implements StaffWorld {
       if (this.pickupT >= CELLAR.pickupInterval && this.cellar.take()) {
         this.pickupT = 0;
         this.player.carrying += 1;
+        sfx.play("pickup");
       }
     }
 
@@ -386,7 +401,10 @@ export class World implements StaffWorld {
       const c = t.customer;
       const near = distance(this.player, { x: t.serveX, y: t.serveY }) < PLAYER.interactRadius;
       if (c && c.phase !== "walking") c.setPlayerHosting(near);
-      if (near && c?.completeCheckout()) this.floats.add(t.x, t.y - 24, "会計!", UI_TEXT.info);
+      if (near && c?.completeCheckout()) {
+        this.floats.add(t.x, t.y - 24, "会計!", UI_TEXT.info);
+        sfx.play("checkout");
+      }
       if (near && t.needsService && this.player.carrying > 0 && this.serveT >= PLAYER.serveInterval) {
         if (c?.serve()) {
           this.player.carrying -= 1;
@@ -413,11 +431,15 @@ export class World implements StaffWorld {
         s.earn(amount);
         this.ledger.recordSale(amount, c.lastOrder, hostId, byPlayer, c.table.grade);
         this.floats.add(c.table.x, c.table.y - 30, `+${formatG(amount)}`, c.vip ? UI_TEXT.vipGold : UI_TEXT.gold);
+        const big = c.vip || c.table.isPremium;
+        sfx.play(big ? "bigSale" : "sale");
+        this.particles.coins(c.table.x, c.table.y - 20, big ? 14 : 5);
         const who = hostName ? `[${hostName}] ` : "";
         this.lastSale = { text: `${who}${c.vip ? "VIP " : ""}${c.lastOrder.name} ${formatG(amount)}`, t: 3 };
       } else if (ev === "gaveUp") {
         this.ledger.walkouts += 1;
         this.floats.add(c.table.x, c.table.y - 30, "帰った…", UI_TEXT.danger);
+        sfx.play("angry");
       }
       if (c.phase === "leaving" && !c.departureHandled) this.handleDeparture(c);
     }
@@ -566,6 +588,8 @@ export class World implements StaffWorld {
     } else if (vip) {
       this.ledger.vipVisits += 1;
       this.floats.add(ENTRANCE.x + 20, ENTRANCE.y - 30, "VIP来店!", UI_TEXT.vipGold);
+      this.vipSpotT = 2.5;
+      sfx.play("vip");
     }
   }
 }
